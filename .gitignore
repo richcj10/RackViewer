@@ -1,0 +1,10 @@
+# site settings and secrets stay on the Pi
+config.json
+ha_token
+*.token
+
+# runtime
+rackview.log
+rackview.log.old
+__pycache__/
+*.pyc

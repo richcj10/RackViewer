@@ -1,0 +1,40 @@
+{
+  "ha_url": "http://homeassistant.local:8123",
+  "ha_token_file": "~/.config/rackview/ha_token",
+  "uiwled_url": "http://homeassistant.local:8080",
+
+  "ping_hosts": [
+    ["Gateway", null, true],
+    ["Internet", "1.1.1.1", true],
+    ["Home Assistant", "homeassistant.local", true],
+    ["Core switch", "192.168.1.2", false]
+  ],
+
+  "essential_servers": ["router"],
+  "server_names": {"compileserver": "Compile"},
+
+  "ups_prefix": "ups",
+  "ups_test_script": "script.ups_self_test",
+  "pdu_prefix": "usp_pdu_pro",
+  "firewall_prefix": "opnsense",
+  "internet_entity": "",
+
+  "wled_host": "wled-rack.local",
+  "door_open_preset": 1,
+  "door_closed_preset": 2,
+  "extra_lights": [
+    ["Etherlight 48", "light.uiwled_48_port"]
+  ],
+
+  "time_server": "192.168.1.44",
+
+  "port_hunt_switch": "48_Port",
+  "port_hunt_seconds": 60,
+  "port_hunt_rgb": [255, 255, 255],
+
+  "rail_side": "right",
+  "screen_off_after": 900,
+  "door_sleep_delay": 60,
+  "door_closed_idle": 60,
+  "home_after": 120
+}
