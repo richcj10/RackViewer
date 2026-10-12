@@ -53,6 +53,7 @@ with open(os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
     json.dump(new, f, indent=2)
 PY
 cp "$SRC/screens.json" "$HOME/.config/rackview/screens.json"
+for f in notes.json known_devices.json; do [ -f "$SRC/$f" ] && cp "$SRC/$f" "$HOME/.config/rackview/$f"; done
 
 echo "== 6/7 desktop (autostart RackView, no screensaver)"
 for f in wayfire.ini kanshi/config; do

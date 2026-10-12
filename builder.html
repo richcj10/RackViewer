@@ -36,6 +36,11 @@ button { cursor: pointer; }
 .btn:hover:not(:disabled) { border-color: var(--accent); }
 .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 a.btn { color: inherit; text-decoration: none; display: inline-block; }
+#maintbtn.on { background: #9666ff; border-color: #9666ff; color: #fff; }
+.note { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-top: 1px solid var(--line); }
+.note:first-child { border-top: 0; } .note.pinned { border-left: 4px solid var(--accent); }
+.note .body { flex: 1; min-width: 0; white-space: pre-wrap; } .note small { color: var(--muted); display: block; margin-top: 3px; }
+.note textarea { width: 100%; min-height: 60px; }
 .btn.small { padding: 3px 8px; font-size: 12px; border-radius: 6px; }
 .btn.danger { color: var(--danger); }
 .btn:disabled { opacity: .45; cursor: default; }
@@ -149,11 +154,13 @@ textarea.bad, input.bad { border-color: var(--danger) !important; }
   <nav class="navtabs" role="tablist">
     <button role="tab" data-tab="screens" aria-selected="true">Screens</button>
     <button role="tab" data-tab="alerts" aria-selected="false">Alerts</button>
+    <button role="tab" data-tab="notes" aria-selected="false">Notes</button>
     <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
   </nav>
   <span class="spacer"></span>
   <span class="dirty" id="dirty" hidden>Unsaved changes</span>
   <span class="status"><span class="dot" id="hadot"></span><span id="hatext">Connecting…</span></span>
+  <button class="btn small" id="maintbtn" title="Maintenance mode: alerts don't wake the screen or pulse. Starts when the rack door opens.">Maintenance</button>
   <button class="btn small" id="undo">Undo</button>
   <button class="btn small" id="redo">Redo</button>
   <button class="btn" id="showjson">JSON</button>
@@ -181,6 +188,7 @@ textarea.bad, input.bad { border-color: var(--danger) !important; }
   </section>
 </main>
 <main id="view-alerts" class="page" hidden></main>
+<main id="view-notes" class="page" hidden></main>
 <main id="view-settings" class="page" hidden></main>
 <div id="modal-root"></div>
 
@@ -241,8 +249,12 @@ const TYPES = {
   dot: { label: "Dot", ic: "●", cat: "Data", desc: "Status dot", fields: [F("color", "Colour", "color"), F("radius", "Radius (px)", "number")] },
   box: { label: "Box", ic: "■", cat: "Data", desc: "Coloured rectangle behind other items",
     fields: [F("color", "Fill colour", "color"), F("tint", "Fill strength (0–1)", "number"), F("border", "Border colour", "color"), F("bw", "Border width", "number"), F("radius", "Corner radius", "number"), F("pulse", "Pulse while true", "ref")] },
-  graph: { label: "List graph", ic: "⌇", cat: "Data", desc: "Line graph of a list in RackView's data",
-    fields: [F("source", "List", "ref"), F("field", "Field (index or name)", "text"), F("scale", "Multiply by", "number"), F("symmetric", "Centre on zero", "bool"), F("min_span", "Minimum scale", "number"), F("caption", "Scale unit (shows “scale ±x unit”)", "text"), F("color", "Line colour", "color")] },
+  graph: { label: "Graph", ic: "⌇", cat: "Data", desc: "Line graph: recorded history (24 h, 7 days…) or a list",
+    fields: [F("history", "Recorded history (metric)", "metric", { hint: "RackView keeps one value per minute for 30 days. Leave empty to graph a list instead." }),
+      F("minutes", "Time span (minutes)", "number", { showIf: n => n.props.history, hint: "1440 = 24 h, 10080 = 7 days" }),
+      F("source", "List", "ref", { showIf: n => !n.props.history }), F("field", "Field (index or name)", "text", { showIf: n => !n.props.history }),
+      F("scale", "Multiply by", "number"), F("symmetric", "Centre on zero", "bool"), F("zero", "Start the scale at 0", "bool"), F("min_span", "Minimum scale", "number"),
+      F("caption", "Unit for the range caption", "text"), F("color", "Line colour", "color")] },
   tile: { label: "Tile", ic: "▮", cat: "Data", desc: "Big value, label, subtitle, coloured stripe",
     fields: [F("value", "Value text", "text", { hint: "Leave empty to use the Value ref below. " + VALTXT, valueText: true }), F("entity", "Value", "ref"), F("label", "Label", "text"), F("sub", "Subtitle", "text"), F("stripe", "Stripe colour", "color"), F("warn", "Amber when", "rule"), F("crit", "Red when", "rule"), F("unit", "Unit override", "text"), F("decimals", "Decimals", "number")] },
   big: { label: "Big number", ic: "𝟗", cat: "Data", desc: "Large value with optional label", fields: [F("entity", "Value", "ref"), F("label", "Label", "text"), F("unit", "Unit override", "text"), F("decimals", "Decimals", "number"), F("colors", "Colour rules", "colors")] },
@@ -260,7 +272,8 @@ const TYPES = {
     fields: [F("text", "Text", "text", { hint: "Use {item}, {id} or {{ HA template }}." }), F("size", "Size", "seg", { options: [["s", "S"], ["m", "M"], ["l", "L"], ["xl", "XL"]] }),
       F("align", "Align", "seg", { options: [["left", "Left"], ["center", "Centre"], ["right", "Right"]] }), F("color", "Colour", "color")] },
   button: { label: "Action button", ic: "⏻", cat: "Control", desc: "Runs an HA action, opens a detail or goes back",
-    fields: [F("label", "Label", "text"), F("action", "When pressed", "seg", { options: [["service", "Run action"], ["detail", "Open detail"], ["back", "Go back"]] }),
+    fields: [F("label", "Label", "text"), F("action", "When pressed", "seg", { options: [["service", "Run action"], ["detail", "Open detail"], ["back", "Go back"], ["app", "RackView"]] }),
+      F("command", "RackView action", "text", { showIf: n => n.props.action === "app", hint: "maint_toggle · maint_on · maint_off · dev_ack_all · dev_ack:@mac · note_pin:{id}" }),
       F("service", "Action", "service", { showIf: n => (n.props.action || "service") === "service" }),
       F("target", "Target entity", "ref", { showIf: n => (n.props.action || "service") === "service", entityOnly: true }),
       F("data", "Extra data (JSON)", "json", { showIf: n => (n.props.action || "service") === "service" }),
@@ -539,6 +552,7 @@ function fieldHTML(n, f) {
     case "color":
       if (v && typeof v === "object") return `<div class="field">${lab}<textarea id="${id}" class="mono" data-json="${f.key}" spellcheck="false">${esc(JSON.stringify(v, null, 1))}</textarea><span class="hint">Colour map or rules (JSON). <button type="button" class="btn small" data-set="${f.key}" data-v="">Use a simple colour</button></span></div>`;
       return `<div class="field">${lab}<div class="colorrow"><span class="swatch" style="background:${esc(swatchOf(v))}"></span><input type="text" class="mono" id="${id}" data-k="${f.key}" list="colorwords" value="${esc(v)}" placeholder="default"></div><span class="hint">A colour name (ok, warn, crit, info, dim, muted, text, accent, card…), #rrggbb, or a ref holding one, e.g. @color. <button type="button" class="btn small" data-colormap="${f.key}">By value…</button></span></div>`;
+    case "metric": return `<div class="field">${lab}<input type="text" class="mono" id="${id}" data-k="${f.key}" list="metriclist" value="${esc(v)}" placeholder="ups.load"><datalist id="metriclist">${METRICS.map(m => `<option value="${esc(m.key)}">${esc(m.label)}${m.unit ? " (" + esc(m.unit) + ")" : ""}</option>`).join("")}</datalist>${hint}</div>`;
     case "screen": return `<div class="field">${lab}<select id="${id}" data-k="${f.key}"><option value="">— none —</option>${cfg.screens.map(x => `<option value="${esc(x.id)}" ${v === x.id ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select></div>`;
     case "detail": return `<div class="field">${lab}<select id="${id}" data-k="${f.key}"><option value="">— none —</option>${(screen().details || []).map(d => `<option value="${esc(d.id)}" ${v === d.id ? "selected" : ""}>${esc(d.title)}</option>`).join("")}<option value="__new">+ New detail screen…</option></select>${hint}</div>`;
     case "builtin": return `<div class="field">${lab}<select id="${id}" data-k="${f.key}">${(SOURCES.builtin || []).map(b => `<option value="${b.id}" ${v === b.id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select><span class="hint">Draws the original page. On a screen whose id matches the page, it keeps that page's own buttons and alerts.</span></div>`;
@@ -567,6 +581,7 @@ function renderInspector() {
       <div class="field"><label for="s-color">Page colour</label><input type="color" id="s-color" value="${esc(s.color || "#7ee787")}"><span class="hint">Bar under the title and the ▲▼ button LEDs.</span></div>
       <div class="field"><label class="check"><input type="checkbox" id="s-en" ${s.enabled !== false ? "checked" : ""}> Show this screen</label></div>
       <div class="field"><label for="s-mid">Middle button</label><select id="s-mid">${Object.entries({ builtin: "The built-in page's own action", silence: "Silence alarms, then sleep", home: "Go to the first screen", next: "Next item (first Repeater set to One at a time)", details: "Cycle detail screens, then back", reping: "Ping again now", hunt: "Port Hunt: blink / stop", wled_power: "Rack LEDs on / off" }).filter(([k]) => isB || k !== "builtin").map(([k, l]) => `<option value="${k}" ${(s.middle || "home") === k ? "selected" : ""}>${l}</option>`).join("")}</select><span class="hint">▲ / ▼ always change screens; holding the middle button turns the screen off.</span></div>
+      <div class="field"><label for="s-when">Show this screen</label><select id="s-when">${[["", "Always"], ["outage", "Only during a power outage"], ["maintenance", "Only during maintenance"]].map(([k, l]) => `<option value="${k}" ${(s.show_when || "") === k ? "selected" : ""}>${l}</option>`).join("")}</select></div>
       ${s.middle === "next" ? `<div class="field"><label for="s-midlabel">Middle button label</label><input type="text" id="s-midlabel" value="${esc(s.middle_label || "")}" placeholder="Next item"></div>` : ""}
       <div class="actions"><button class="btn small" data-act="dupscreen">Duplicate screen</button><button class="btn small danger" data-act="delscreen">Delete screen</button></div>`;
     return;
@@ -630,6 +645,7 @@ insp.addEventListener("change", e => {
   const t = e.target, n = cur(), s = screen();
   if (t.id === "s-en") return change(() => s.enabled = t.checked);
   if (t.id === "s-mid") return change(() => s.middle = t.value);
+  if (t.id === "s-when") return change(() => { if (t.value) s.show_when = t.value; else delete s.show_when; });
   if (!n) return;
   if (t.dataset.kb) return change(() => { n.props[t.dataset.kb] = t.checked; delete n._items; });
   if (t.dataset.attr !== undefined) return change(() => { const base = String(n.props[t.dataset.attr] || "").split("@")[0]; n.props[t.dataset.attr] = t.value ? base + "@" + t.value : base; });
@@ -670,7 +686,7 @@ insp.addEventListener("click", e => {
 function syncTabFromSelection() { const n = cur(); if (!n) return; const chain = [n, ...ancestors(n.id)];
   for (let i = 0; i < chain.length - 1; i++) if (chain[i].type === "tab" && chain[i + 1].type === "tabs") pv.tab[chain[i + 1].id] = chain[i + 1].children.indexOf(chain[i]); }
 /* RackView data picker (the data model the factory screens use) */
-let MODEL = [];
+let MODEL = [], METRICS = [];
 async function loadModel() { try { MODEL = await api("/api/model"); } catch (e) { MODEL = []; } return MODEL; }
 function modelPicker(pick) {
   const draw = q => MODEL.filter(m => !q || m.path.toLowerCase().includes(q)).slice(0, 400).map(m =>
@@ -717,12 +733,16 @@ function renderAlerts() {
     </tbody></table></div><datalist id="entlist">${ENTS.slice(0, 3000).map(e => `<option value="${esc(e.id)}">`).join("")}</datalist>
     <p><button class="btn" id="addalert">+ Add alert</button></p>
     <div class="box"><h3>Alerts from Home Assistant labels</h3><p class="lead" style="margin:0">Any binary sensor in HA carrying this label raises a warning while it is on.</p>
-      <div class="field"><label for="alabel">HA label</label><input type="text" id="alabel" class="mono" value="${esc(cfg.alertLabel || "")}" style="max-width:260px"></div></div>`;
+      <div class="field"><label for="alabel">HA label</label><input type="text" id="alabel" class="mono" value="${esc(cfg.alertLabel || "")}" style="max-width:260px"></div></div>
+    <div class="box" id="devbox" style="margin-top:12px"><p class="hint">Loading devices…</p></div>`;
+  renderDevices();
 }
 document.getElementById("view-alerts").addEventListener("change", e => { const t = e.target;
   if (t.dataset.ai) change(() => { const a = cfg.alerts[+t.dataset.ai]; a[t.dataset.ak] = t.value; if (t.dataset.ak === "ref") delete a.entity; });
   if (t.id === "alabel") change(() => cfg.alertLabel = t.value); });
-document.getElementById("view-alerts").addEventListener("click", e => {
+document.getElementById("view-alerts").addEventListener("click", async e => {
+  const da = e.target.closest("[data-devack]");
+  if (da) { try { await api("/api/devices/ack", { method: "POST", body: JSON.stringify({ mac: da.dataset.devack || null }) }); toast("Marked known"); } catch (err) { toast(err.message); } setTimeout(renderDevices, 1200); return; }
   if (e.target.id === "addalert") change(() => (cfg.alerts = cfg.alerts || []).push({ ref: "", op: ">", value: "", severity: "warn", page: cfg.screens[0].id, text: "New alert" }));
   const d = e.target.closest("[data-adel]"); if (d) change(() => cfg.alerts.splice(+d.dataset.adel, 1)); });
 let settings = null;
@@ -743,6 +763,46 @@ async function renderSettings() {
     <h1 style="margin-top:22px">Backup</h1><p class="lead">Configuration is backed up on every save: every screen as layout data, alert rules, site settings and the Pi setup. The app code lives in its own repository; the backup records which version this display runs. Passwords and the HA token are never included.</p>
     <div class="cards" id="backupcards"><div class="box"><p class="hint">Loading…</p></div></div>`;
   renderBackup();
+}
+
+/* ============================================================ notes (scratchbook) */
+let NOTES = [], editNote = null;
+async function renderNotes() {
+  const el = document.getElementById("view-notes");
+  try { NOTES = await api("/api/notes"); } catch (e) { el.innerHTML = `<p>Couldn't load notes: ${esc(e.message)}</p>`; return; }
+  NOTES.sort((a, b) => (b.pinned - a.pinned) || (b.ts - a.ts));
+  const fmtT = ts => new Date(ts * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  el.innerHTML = `<h1>Scratchbook</h1><p class="lead">Notes about the rack: what you changed, what's ordered, what to check. They show on the display's Scratchbook screen (pinned first) and in the Timeline, and are part of the backup.</p>
+    <div class="box"><textarea id="newnote" placeholder="e.g. Replaced drive 3 in Unraid; old one is in the drawer" style="min-height:70px"></textarea>
+      <div class="btnrow"><button class="btn primary" id="addnote">Add note</button><span class="hint">Ctrl+Enter adds it.</span></div></div>
+    <div class="box" style="margin-top:12px;padding:0">${NOTES.map(n => `<div class="note${n.pinned ? " pinned" : ""}">
+      <div class="body">${editNote === n.id ? `<textarea data-noteedit="${esc(n.id)}">${esc(n.text)}</textarea>` : esc(n.text)}<small>${esc(fmtT(n.ts))}${n.pinned ? " · pinned" : ""}</small></div>
+      <div class="btnrow">${editNote === n.id ? `<button class="btn small primary" data-notesave="${esc(n.id)}">Save</button>` : `<button class="btn small" data-noteedit-start="${esc(n.id)}">Edit</button>`}
+        <button class="btn small" data-notepin="${esc(n.id)}">${n.pinned ? "Unpin" : "Pin"}</button><button class="btn small danger" data-notedel="${esc(n.id)}">Delete</button></div></div>`).join("") || `<p class="hint" style="padding:12px">No notes yet.</p>`}</div>`;
+}
+document.getElementById("view-notes").addEventListener("click", async e => {
+  const t = e.target, call = (path, method, body) => api(path, { method, body: body ? JSON.stringify(body) : undefined });
+  try {
+    if (t.id === "addnote") { const v = document.getElementById("newnote").value.trim(); if (!v) return toast("Write something first");
+      await call("/api/notes", "POST", { text: v }); toast("Note added"); }
+    else if (t.dataset.notepin) { const n = NOTES.find(x => x.id === t.dataset.notepin); await call("/api/notes/" + n.id, "PUT", { pinned: !n.pinned }); }
+    else if (t.dataset.notedel) { if (!confirm("Delete this note?")) return; await call("/api/notes/" + t.dataset.notedel, "DELETE"); }
+    else if (t.dataset.noteeditStart) { editNote = t.dataset.noteeditStart; }
+    else if (t.dataset.notesave) { const v = document.querySelector(`[data-noteedit="${t.dataset.notesave}"]`).value.trim();
+      await call("/api/notes/" + t.dataset.notesave, "PUT", { text: v }); editNote = null; toast("Saved"); }
+    else return;
+    renderNotes();
+  } catch (err) { toast(err.message); }
+});
+document.getElementById("view-notes").addEventListener("keydown", e => { if (e.target.id === "newnote" && e.key === "Enter" && (e.ctrlKey || e.metaKey)) document.getElementById("addnote").click(); });
+
+/* ============================================================ new devices (Alerts tab) */
+async function renderDevices() {
+  await pollOps(); const el = document.getElementById("devbox"); if (!el || !OPST) return;
+  const d = OPST.devices_new || [];
+  el.innerHTML = `<h3>New devices on the network</h3><p class="lead" style="margin:0">A device that wasn't on the network before raises a warning until you mark it known. Watching ${OPST.devices_scope === "all" ? `all ${OPST.devices_count} UniFi clients (wired and Wi-Fi)` : `the port-map switch only; update the UniFi Port Map add-on to 1.1 to watch every client`}.</p>
+    ${d.length ? `<div class="tblwrap"><table class="tbl"><thead><tr><th>Device</th><th>IP</th><th>Where</th><th>First seen</th><th></th></tr></thead><tbody>${d.map(x => `<tr><td>${esc(x.name)}</td><td class="mono">${esc(x.ip)}</td><td>${esc(x.at)}</td><td>${esc(x.when)}</td><td><button class="btn small" data-devack="${esc(x.mac)}">Mark known</button></td></tr>`).join("")}</tbody></table></div>
+      <p><button class="btn" data-devack="">Mark all known</button></p>` : `<p class="hint">Nothing new. ${OPST.devices_count || 0} devices known.</p>`}`;
 }
 
 /* ============================================================ backup */
@@ -823,8 +883,8 @@ document.getElementById("view-settings").addEventListener("click", async e => { 
 /* ============================================================ top bar, modal, toast */
 document.querySelectorAll(".navtabs button").forEach(b => b.onclick = () => {
   document.querySelectorAll(".navtabs button").forEach(x => x.setAttribute("aria-selected", x === b));
-  ["screens", "alerts", "settings"].forEach(t => document.getElementById("view-" + t).hidden = t !== b.dataset.tab);
-  renderAll(); if (b.dataset.tab === "settings") renderSettings(); });
+  ["screens", "alerts", "notes", "settings"].forEach(t => document.getElementById("view-" + t).hidden = t !== b.dataset.tab);
+  renderAll(); if (b.dataset.tab === "settings") renderSettings(); if (b.dataset.tab === "notes") renderNotes(); if (b.dataset.tab === "alerts") renderDevices(); });
 document.getElementById("undo").onclick = () => { if (!hist.length) return; fut.push(JSON.stringify(cfg)); cfg = JSON.parse(hist.pop()); fixSel(); setDirty(true); renderAll(); };
 document.getElementById("redo").onclick = () => { if (!fut.length) return; hist.push(JSON.stringify(cfg)); cfg = JSON.parse(fut.pop()); fixSel(); setDirty(true); renderAll(); };
 document.addEventListener("keydown", e => {
@@ -859,7 +919,16 @@ function renderAll(preview) {
   if (!document.getElementById("view-alerts").hidden) renderAlerts();
   document.getElementById("undo").disabled = !hist.length; document.getElementById("redo").disabled = !fut.length;
 }
-async function pollStatus() { try { const s = await api("/api/status"); document.getElementById("hadot").className = "dot " + (s.ha_ok ? "ok" : "bad");
+let OPST = null;
+async function pollOps() { try { OPST = await api("/api/ops"); } catch (e) { return; }
+  const b = document.getElementById("maintbtn"), m = OPST.maint || {};
+  b.classList.toggle("on", !!m.active); b.textContent = m.active ? `Maintenance · ${Math.round(m.minutes)} min${m.source === "door" ? " (door)" : ""}` : "Maintenance";
+  if (OPST.outage && OPST.outage.active) document.getElementById("hatext").textContent = "⚡ POWER OUTAGE · on battery"; }
+document.getElementById("maintbtn").onclick = async () => {
+  const on = !(OPS && OPST.maint && OPST.maint.active);
+  try { await api("/api/maintenance", { method: "POST", body: JSON.stringify({ on }) }); toast(on ? "Maintenance started: alerts won't wake the screen" : "Maintenance ended"); }
+  catch (e) { toast(e.message); } setTimeout(pollOps, 1500); };
+async function pollStatus() { pollOps(); try { const s = await api("/api/status"); document.getElementById("hadot").className = "dot " + (s.ha_ok ? "ok" : "bad");
   document.getElementById("hatext").textContent = s.ha_ok ? `Display on “${(cfg.screens.find(x => x.id === s.page) || {}).title || s.page}”` : "Home Assistant not answering"; } catch (e) {} }
 
 (async function boot() {
@@ -867,7 +936,7 @@ async function pollStatus() { try { const s = await api("/api/status"); document
     [cfg, ENTS, SOURCES] = await Promise.all([api("/api/config"), api("/api/entities"), api("/api/sources")]);
   } catch (e) { if (e.message !== "login") document.getElementById("view-screens").innerHTML = `<div class="banner"><b>Can't reach RackView.</b><p>${esc(e.message)}</p></div>`; return; }
   ENTS.forEach(e => ENT[e.id] = e);
-  loadModel();
+  loadModel(); api("/api/history/metrics").then(x => METRICS = x).catch(() => {});
   document.body.insertAdjacentHTML("beforeend", `<datalist id="colorwords">${COLOR_WORDS.map(c => `<option value="${c}">`).join("")}</datalist>`);
   cfg.screens.forEach(s => { s.details = s.details || []; });
   sel.screen = cfg.screens[0].id;
@@ -892,7 +961,7 @@ async function selftest() {
     document.getElementById("undo").click(); document.getElementById("undo").click(); log("after undo x2 has pill:", !!findNode(added.id, screen().root));
     sel.detail = "fan-detail"; sel.node = null; renderAll(); await new Promise(r => setTimeout(r, 1500)); log("detail preview rects", rects.length);
     const t = await api("/api/template", { method: "POST", body: JSON.stringify({ template: "{{ 1 + 1 }}" }) }); log("template", t.result);
-    const shown = () => ["screens", "alerts", "settings"].filter(v => getComputedStyle(document.getElementById("view-" + v)).display !== "none").join(",");
+    const shown = () => ["screens", "alerts", "notes", "settings"].filter(v => getComputedStyle(document.getElementById("view-" + v)).display !== "none").join(",");
     for (const tab of ["alerts", "settings", "screens"]) {
       document.querySelector(`.navtabs [data-tab=${tab}]`).click(); await new Promise(r => setTimeout(r, 400));
       log(`tab ${tab}: visible views = ${shown()}`, shown() === tab ? "OK" : "WRONG");
@@ -904,6 +973,12 @@ async function selftest() {
       log("free layout: label has x field", !!insp.querySelector("input[data-k=x]"), "colour field", !!insp.querySelector("input[list=colorwords]"), "insert-value chip", !!insp.querySelector("[data-modelins]"));
       await loadModel(); log("model paths", MODEL.length, "has $ups.batt", MODEL.some(m => m.path === "ups.batt"));
       const t = await api("/api/text", { method: "POST", body: JSON.stringify({ text: "UPS ${$ups.batt|u:%}" }) }); log("text api", t.text); }
+    const ops = await api("/api/ops"); log("ops: maint", JSON.stringify(ops.maint), "devices", ops.devices_count, ops.devices_scope, "notes", ops.notes.length);
+    const nn = await api("/api/notes", { method: "POST", body: JSON.stringify({ text: "selftest note" }) });
+    document.querySelector(`.navtabs [data-tab=notes]`).click(); await new Promise(r => setTimeout(r, 800));
+    log("notes tab shows note", document.getElementById("view-notes").textContent.includes("selftest note"), "visible", getComputedStyle(document.getElementById("view-notes")).display !== "none");
+    await api("/api/notes/" + nn.id, { method: "DELETE" });
+    const mets = await api("/api/history/metrics"); log("history metrics", mets.length);
     document.querySelector(`.navtabs [data-tab=settings]`).click(); await new Promise(r => setTimeout(r, 1500));
     log("backup versions", BK && BK.history.length, "download links", document.querySelectorAll("a[href^='/api/backup/download']").length);
     document.querySelector(`.navtabs [data-tab=screens]`).click();

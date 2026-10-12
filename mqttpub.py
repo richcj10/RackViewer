@@ -38,6 +38,7 @@ class Publisher:
         c.username_pw_set(self.user, self.password)
         c.will_set(f"{BASE}/{self.node}/status", "offline", retain=True)
         c.on_connect = lambda cl, u, f, rc: self._on_connect(cl, rc)
+        c.on_message = lambda cl, u, msg: self._on_message(msg)
         c.on_disconnect = lambda cl, u, rc: setattr(self, "connected", False)
         return c
 
@@ -47,8 +48,14 @@ class Publisher:
             return
         self.connected = True
         c.publish(f"{BASE}/{self.node}/status", "online", retain=True)
+        c.subscribe(f"{BASE}/{self.node}/maintenance/set")
         self.discovery(c)
         print(time.strftime("%H:%M:%S"), "mqtt: connected, publishing rack data", flush=True)
+
+    def _on_message(self, msg):
+        """HA flips the maintenance switch."""
+        on = msg.payload.decode(errors="replace").strip().upper() in ("ON", "1", "TRUE")
+        self.ui.web_q.put(("app", "maint_on" if on else "maint_off"))
 
     def entities(self):
         ents = [
@@ -61,6 +68,13 @@ class Publisher:
             ("binary_sensor", "pi_synced", "Clock synced", "pi_synced", {"payload_on": "on", "payload_off": "off", "icon": "mdi:clock-check"}),
             ("binary_sensor", "port_hunt", "Port Hunt blinking", "hunt", {"payload_on": "on", "payload_off": "off", "icon": "mdi:ethernet"}),
             ("sensor", "port_hunt_port", "Port Hunt port", "hunt_port", {"icon": "mdi:ethernet"}),
+            ("switch", "maintenance", "Maintenance mode", "maint", {"payload_on": "on", "payload_off": "off", "icon": "mdi:wrench",
+                                                                    "command_topic": f"{BASE}/{self.node}/maintenance/set",
+                                                                    "state_on": "on", "state_off": "off"}),
+            ("binary_sensor", "outage", "Power outage", "outage", {"device_class": "problem", "payload_on": "on",
+                                                                   "payload_off": "off", "icon": "mdi:power-plug-off"}),
+            ("sensor", "new_devices", "New network devices", "new_devices", {"state_class": "measurement", "icon": "mdi:devices"}),
+            ("sensor", "last_event", "Last rack event", "last_event", {"icon": "mdi:timeline-text"}),
         ]
         import rackview as rv
         for label, _host, _crit in rv.PING_HOSTS:
@@ -88,7 +102,10 @@ class Publisher:
               "alerts": len(m.get("alerts") or []),
               "pi_offset_us": round(srv["offset"] * 1e6, 1) if srv and tm.get("fails", 9) < 2 else None,
               "pi_synced": "on" if pi.get("synced") and pi.get("server") == rv.TIME_SERVER else "off",
-              "hunt": "on" if ui.hunt_active() else "off", "hunt_port": ui.hunt_port if ui.hunt_active() else None}
+              "hunt": "on" if ui.hunt_active() else "off", "hunt_port": ui.hunt_port if ui.hunt_active() else None,
+              "maint": "on" if ui.maint else "off", "outage": "on" if ui.outage else "off",
+              "new_devices": len(m.get("devices_new") or []),
+              "last_event": ((m.get("events") or [{}])[0].get("text") or "")[:250]}
         for p in m.get("pings") or []:
             k = slug(p["label"])
             st[f"ping_{k}"] = round(p["ms"], 1) if p.get("ms") is not None else None

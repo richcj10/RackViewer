@@ -44,6 +44,8 @@ never included.
 |---|---|
 | `screens.json` | Every screen as layout data: positions, text, values, colours, detail screens, alert rules |
 | `config.json` | Site settings (IPs, presets, ping hosts…) |
+| `notes.json` | The scratchbook |
+| `known_devices.json` | Devices already seen on the network (new-device alerts) |
 | `system/` | Pi setup: desktop autostart, chrony (GPS time), timezone, apt/pip package lists, boot config (reference) |
 | `code.json` | Code repository and the exact commit this display ran (`code.patch` only if it had local changes) |
 | `restore.sh` | Fetches that code version and rebuilds a fresh Pi with this configuration |
@@ -137,13 +139,18 @@ class Backup:
     def bundle(self):
         return {"format": "rackview-backup", "version": 1, "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 "host": socket.gethostname(), "screens": _read(self.screens_file),
-                "config": sanitize(_read(self.config_file, {}))}
+                "config": sanitize(_read(self.config_file, {})),
+                "notes": _read(os.path.join(self.dir, "notes.json")),
+                "known_devices": _read(os.path.join(self.dir, "known_devices.json"))}
 
     def kit(self):
         """{path: bytes} of the rebuild kit (the layout of the git repo and of the .tar.gz)."""
         b = self.bundle()
         files = {"screens.json": _dump(b["screens"]), "config.json": _dump(b["config"]), "README.md": README.encode(),
                  "restore.sh": RESTORE_SH.encode()}
+        for k in ("notes", "known_devices"):
+            if b.get(k) is not None:
+                files[k + ".json"] = _dump(b[k])
         code = self.code_info()
         files["code.json"] = _dump({k: v for k, v in code.items() if k != "patch"})
         if code.get("patch"):
@@ -228,6 +235,8 @@ class Backup:
             if err:
                 raise ValueError("The backup's screens are invalid: " + err)
             _write(self.screens_file, b["screens"])
+            if b.get("notes") is not None:
+                _write(os.path.join(self.dir, "notes.json"), b["notes"])
         if "config" in parts and isinstance(b.get("config"), dict):
             cur = _read(self.config_file, {}) or {}
             new = dict(sanitize(b["config"]))
@@ -235,6 +244,8 @@ class Backup:
             if new != cur:
                 _write(self.config_file, new, 0o600)
                 restart = True
+            if b.get("known_devices") is not None:
+                _write(os.path.join(self.dir, "known_devices.json"), b["known_devices"])
         return restart
 
     # ------------------------------------------------------------ version history
@@ -256,7 +267,7 @@ class Backup:
             h = self.history()
             if h:
                 last = _read(os.path.join(self.hist_dir, h[0]["id"] + ".json"), {}) or {}
-                if last.get("screens") == b["screens"] and last.get("config") == b["config"]:
+                if all(last.get(k) == b.get(k) for k in ("screens", "config", "notes")):
                     return None
             stamp, n = time.strftime("%Y%m%d-%H%M%S"), 1
             while os.path.exists(os.path.join(self.hist_dir, f"{stamp}-{n:02d}.json")):
@@ -404,8 +415,10 @@ class Backup:
         with self.lock:
             scr = json.loads(self._git("show", f"{sha}:screens.json").stdout)
             conf = self._git("show", f"{sha}:config.json", check=False)
+            notes = self._git("show", f"{sha}:notes.json", check=False)
         return {"format": "rackview-backup", "version": 1, "screens": scr,
-                "config": json.loads(conf.stdout) if conf.returncode == 0 else None}
+                "config": json.loads(conf.stdout) if conf.returncode == 0 else None,
+                "notes": json.loads(notes.stdout) if notes.returncode == 0 else None}
 
     def info(self):
         url = self.git_url()

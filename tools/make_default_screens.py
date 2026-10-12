@@ -457,8 +457,104 @@ lights = screen("lights", "Lights", "#ffffff", N("tabs", dict(bar_h=38, tab_w=16
     ])]),
 ]), middle="wled_power")
 
+
+# ============================================================ Power outage (only shown while the UPS is on battery)
+start("po")
+outage = screen("outage", "Power Outage", "#f85149", free(0, 0, 658, 420, [
+    BOX(0, 0, 658, 96, "crit", tint=0.3, radius=12, pulse="$outage.low"),
+    BOX(0, 0, 658, 96, "none", border="crit", bw=2, radius=12),
+    L("ON BATTERY", 18, 10, 30, "crit", bold=True, w=330),
+    L("Mains lost at ${$outage.since_text} · ${$outage.minutes|d:0} min ago", 20, 50, 15, w=360),
+    L("UPS ${$ups.status|or:?}", 20, 72, 12, "sand", w=360),
+    L("${$outage.runtime|d:0} min", 0, 6, 46, "$outage.runtime_color", bold=True, align="right", r=18, w=260),
+    L("runtime left", 0, 66, 13, "sand", align="right", r=20, w=200),
+    card(0, 104, 320, 316, [
+        L("UPS", 14, 10, 15, "muted"),
+        L("${$ups.batt|d:0|u:%}", 14, 32, 40, bold=True, w=160),
+        L("battery", 0, 50, 13, "muted", align="right", r=14, w=100),
+        BAR("$ups.batt", 14, 84, 292, 10, color={"ref": "$outage.low", "map": {"true": "crit"}, "default": "warn"}),
+        L("Load", 14, 104, 14, "muted"), L("${$ups.load|d:0|u:%}", 0, 104, 14, align="right", r=14, w=80),
+        BAR("$ups.load", 14, 124, 292, 8, color="$ups.load_color"),
+        KV("Rack power", "${$pdu.watts|d:0|u: W}", 14, 146, r=14, size=15),
+        KV("Mains voltage", "${$ups.vin|d:0|u: V}", 14, 170, r=14, size=15),
+        KV("Battery voltage", "${$ups.bvolt|d:1|u: V}", 14, 194, r=14, size=15),
+        KV("Internet", "${$inet.ms|d:0|u: ms|or:DOWN}", 14, 218, r=14, size=15),
+        L("Hard power-off is never offered; shutdowns are soft (ACPI) and need a 1.5 s hold.", 14, 252, 12, "dim", r=14, wrap=3),
+    ]),
+    card(328, 104, 330, 316, [
+        L("Shutdown plan", 14, 10, 15, "muted"),
+        L("${$outage.advice}", 14, 32, 13, "$outage.advice_color", bold=True, r=14, wrap=2),
+        REP("$outage.plan", 10, 70, 310, 240, [free(0, 0, None, 54, [
+            BOX(0, 0, 310, 48, "card2", radius=8),
+            BOX(0, 8, 4, 32, "@color", radius=2),
+            L("${@name}", 14, 6, 16, bold=True, w=170),
+            L("${@note} · ${@watts|d:0|u: W|or:—}", 14, 27, 12, "muted", w=180),
+            N("button", dict(pos(None, 6, 96, 36, 6), label="Shut down", color="warn", size=13, exact=True,
+                             service="button.press", target="button.idrac_{id}_soft_shutdown", confirm="hold",
+                             confirm_title="Soft Shutdown: {item}?", danger=True,
+                             confirm_text="Power outage: asks {item}'s OS to shut down cleanly\n(ACPI power button) to save UPS runtime.",
+                             show_if=show("@can_soft", "==", True))),
+        ])], mode="all", columns=1, row_h=54, gap_y=0),
+    ]),
+]), middle="silence", show_when="outage")
+
+# ============================================================ Timeline + history + new devices
+start("tl")
+graph_card = lambda y, title, key, unit: card(0, y, 270, 86, [
+    L(title, 12, 6, 13, "muted", w=150),
+    N("graph", dict(pos(10, 26, 250, 52), history=key, minutes=1440, caption=unit, color="info")),
+])
+timeline = screen("timeline", "Timeline", "#9b8cff", free(0, 0, 658, 420, [
+    card(0, 0, 380, 420, [
+        L("What happened", 14, 10, 15, "muted"),
+        L("newest first", 0, 12, 12, "dim", align="right", r=14, w=100),
+        L("Nothing yet: events appear as they happen.", 14, 40, 14, "dim", show_if=show("$events", "is_empty")),
+        REP("$events", 8, 34, 364, 380, [free(0, 0, None, 38, [
+            DOT("@color", 10, 10, 5),
+            L("${@when}", 22, 2, 12, "muted", w=86),
+            L("${@text}", 100, 0, 14, r=4),
+            L("${@detail|or:}", 100, 19, 11, "dim", r=4),
+        ])], max=10, mode="all", columns=1, row_h=38, gap_y=0),
+    ]),
+    free(388, 0, 270, 420, [
+        card(0, 0, 270, 156, [
+            L("New devices", 14, 10, 15, "muted"),
+            L("${$devices_count|or:0} on the network", 0, 12, 12, "dim", align="right", r=14, w=130),
+            L("Nothing new on the network.", 14, 44, 14, "ok", show_if=show("$devices_new", "is_empty")),
+            L("Alerts here when a device joins that wasn't seen before.", 14, 66, 12, "dim", r=14, wrap=2,
+              show_if=show("$devices_new", "is_empty")),
+            REP("$devices_new", 10, 34, 250, 76, [free(0, 0, None, 38, [
+                L("${@name}", 4, 0, 14, "warn", bold=True, r=4),
+                L("${@ip} · ${@at}", 4, 19, 11, "muted", r=4),
+            ])], max=2, mode="all", columns=1, row_h=38, gap_y=0),
+            N("button", dict(pos(10, 112, None, 34, 10), label="Mark all known", action="app", command="dev_ack_all",
+                             color="info", size=13, exact=True, show_if=show("$devices_new"))),
+        ]),
+        graph_card(164, "UPS load · 24 h", "ups.load", "%"),
+        graph_card(254, "Rack power · 24 h", "pdu.watts", "W"),
+        graph_card(344, "Internet ping · 24 h", "inet.ms", "ms"),
+    ]),
+]))
+
+# ============================================================ Scratchbook
+start("nb")
+notes = screen("notes", "Scratchbook", "#2ec4b6", card(0, 0, 658, 420, [
+    L("Notes about the rack", 14, 10, 15, "muted"),
+    L("write and edit them in the builder · Notes", 0, 12, 12, "dim", align="right", r=14, w=300),
+    L("No notes yet. Open the builder and add one, e.g. which drive was replaced.", 14, 44, 15, "dim", r=14, wrap=2,
+      show_if=show("$notes", "is_empty")),
+    REP("$notes", 10, 36, 638, 380, [free(0, 0, None, 76, [
+        BOX(0, 0, 638, 70, "card2", radius=8),
+        BOX(0, 8, 4, 54, "@color", radius=2),
+        L("${@text}", 14, 8, 15, r=100, wrap=2),
+        L("${@when}", 14, 50, 11, "muted", w=200),
+        N("button", dict(pos(None, 16, 80, 36, 10), label="${@pin_label}", action="app", command="note_pin:{id}",
+                         color="teal", size=13, exact=True)),
+    ])], max=5, mode="all", columns=1, row_h=76, gap_y=0),
+]))
+
 out = {"version": 2, "alertLabel": "rackview_alert", "alerts": [],
-       "screens": [overview, power, servers, network, ports, time_, hotspot, ha, cooling, lights]}
+       "screens": [overview, power, servers, network, ports, time_, hotspot, ha, cooling, lights, timeline, notes, outage]}
 path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "layouts", "default_screens.json")
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, "w", encoding="utf-8", newline="\n") as f:

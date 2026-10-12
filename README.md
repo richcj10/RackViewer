@@ -33,6 +33,27 @@ Values in text: `${ref|filter|…}` where ref is `$data.path`, `@field` of the c
 `map:on=ON;off=OFF;*=?`, `x:1000`, `upper`, `age`, `time:%H:%M`. Colours: a name (`ok warn crit info dim
 muted text accent …`), `#rrggbb`, a ref to a colour name (`@color`), a value map or rules.
 
+## Running the rack
+
+- **Power outage mode**: when the UPS goes on battery the *Power Outage* screen appears (it is hidden otherwise)
+  and the screen wakes: runtime left, battery, load, and a shutdown plan listing the servers, non-essential first
+  (`outage_order` in config.json). Each soft shutdown waits for a 1.5 s hold; nothing shuts down by itself and
+  hard power-off is never offered. Below `outage_suggest_minutes` of runtime it tells you to act now. The arrow
+  LEDs pulse amber until mains is back.
+- **Maintenance mode** starts when the rack door opens and ends when it closes; it can also be started from the
+  Help screen, the builder or Home Assistant (MQTT switch), then it stays on until ended. During maintenance
+  alerts still show but don't wake the screen, jump to Overview or pulse the middle LED; a purple strip and
+  chip mark the header and the arrow LEDs glow purple.
+- **Scratchbook**: dated notes about the rack, written in the builder (Notes tab) and shown on the display, pinned
+  first. They are part of the backup.
+- **History and timeline**: one value per minute for 30 days (`history.db`, SQLite) for UPS, power, ping, temperatures,
+  clock offset, … (`history_metrics` in config.json adds more); the Graph widget draws any of them. The *Timeline*
+  screen lists what happened: alerts raised and cleared, door, maintenance, outages, servers powered on/off,
+  new devices, notes.
+- **New-device alerts**: a device that joins the network for the first time raises a warning until it is marked
+  known (on the Timeline screen or in the builder). With UniFi Port Map add-on 1.1 every UniFi client counts,
+  wired and Wi-Fi; older versions cover the port-map switch only.
+
 ## Screen builder
 
 A web page served by the Pi (`http://<pi>:8088`) edits `screens.json`: tree with drag and drop, the exact

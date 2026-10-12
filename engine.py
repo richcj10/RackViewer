@@ -512,7 +512,8 @@ class Engine:
         if t == "label":
             size = int(p.get("size") or 15)
             if p.get("wrap"):
-                return len(self.ui.wrap(self.text(p.get("text"), item), size, max(20, w), int(p["wrap"]))) * (size + 4)
+                return len(self.wrap(self.text(p.get("text"), item), size, self.flag(p.get("bold"), item), max(20, w),
+                                     int(p["wrap"]))) * (size + 4)
             return size + 6
         if t == "kv":
             return int(p.get("size") or 16) + 9
@@ -587,6 +588,20 @@ class Engine:
         if n.get("type") == "dot":
             return 2 * int(p.get("radius") or 5) + 2
         return 40
+
+    def wrap(self, text, size, bold, maxw, max_lines):
+        """Split text into lines that fit maxw in that font (bold text is wider)."""
+        font, lines, line = self.ui.F(size, bold), [], ""
+        for wd in str(text).split():
+            if line and font.size(line + " " + wd)[0] > maxw:
+                lines.append(line)
+                line = wd
+                if len(lines) == max_lines:
+                    lines[-1] += " …"
+                    return lines
+            else:
+                line = (line + " " + wd).strip()
+        return lines + ([line] if line else [])
 
     def flag(self, v, item):
         """A yes/no prop given literally or as a @/$ ref."""
@@ -853,7 +868,7 @@ class Engine:
             return
         if p.get("wrap"):
             lh = size + 4
-            for k, line in enumerate(ui.wrap(text, size, max(20, r.w), int(p["wrap"]))):
+            for k, line in enumerate(self.wrap(text, size, bold, max(20, r.w), int(p["wrap"]))):
                 x = {"center": r.centerx, "right": r.right}.get(align, r.x)
                 ui.T(line, size, col, (x, r.y + k * lh), self.ANCHOR[("top", align)], bold=bold)
             return
@@ -900,7 +915,12 @@ class Engine:
         import rackview as rv
         ui = self.ui
         ui.pg.draw.rect(ui.canvas, rv.BG, r, border_radius=6)
-        series = self.resolve(p.get("source"), item) or []
+        if p.get("history"):                    # minute history kept by RackView (history.py)
+            series = [v for _t, v in ui.history.series(self.text(p["history"], item), int(p.get("minutes") or 1440))]
+            if len(series) < 2:
+                ui.T("collecting history…", 11, rv.DIM, (r.x + 6, r.y + 4))
+        else:
+            series = self.resolve(p.get("source"), item) or []
         f, k = p.get("field"), float(p.get("scale") or 1)
         vals = []
         for x in series:
@@ -920,7 +940,12 @@ class Engine:
                 ui.T(f"scale ±{span:.2f} {p['caption']}", 11, rv.DIM, (r.right, r.bottom + 3), "topright")
         else:
             lo, hi = min(vals), max(vals)
+            if p.get("zero"):
+                lo = min(lo, 0)
             span = (hi - lo) or 1
+            if p.get("caption"):
+                d = 0 if hi - lo >= 10 or hi >= 100 else 1
+                ui.T(f"{lo:.{d}f}–{hi:.{d}f} {p['caption']}  now {vals[-1]:.{d}f}", 11, rv.DIM, (r.right - 6, r.y + 3), "topright")
             pts = [(r.x + 4 + i * (r.w - 8) / (len(vals) - 1), r.bottom - 4 - (v - lo) / span * (r.h - 8)) for i, v in enumerate(vals)]
         ui.pg.draw.lines(ui.canvas, self.paint(p.get("color"), item, None, rv.INFO), False, pts, 2)
 
@@ -1098,6 +1123,8 @@ class Engine:
                 return ui.open_detail(p["link"], item)
             if action == "back":
                 return ui.close_detail()
+            if action == "app":
+                return ui.web_q.put(("app", self.text(p.get("command"), item)))
             svc = templ(p.get("service") or "", item)
             if "." not in svc:
                 return ui.notify("This button has no action set", rv.WARN, 3)

@@ -33,7 +33,9 @@ args = sys.argv[1:]
 wait = float(args.pop(0)) if args and args[0].replace(".", "").isdigit() else 8
 ui = rv.UI()
 time.sleep(wait)
-ui.model = rv.build_model(ui.data)
+m = rv.build_model(ui.data)
+ui.app_model(m)
+ui.model = m
 ui.refresh_watch()
 for a in ui.model["alerts"]:
     print("alert", a.sev, a.page, a.text, "|", a.detail)

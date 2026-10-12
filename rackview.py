@@ -118,6 +118,10 @@ PORTMAP_MODEL = "UniFi Port Map"   # HA device model published by the UniFi Port
 PORT_HUNT_SWITCH = cfg("port_hunt_switch", "48_Port")   # UIWLED switch name that gets its jack blinked
 PORT_HUNT_SECONDS = cfg("port_hunt_seconds", 60)
 PORT_HUNT_RGB = cfg("port_hunt_rgb", [255, 255, 255])
+CONF_DIR = os.path.dirname(os.path.abspath(CONFIG_FILE))
+OUTAGE_SUGGEST_MIN = cfg("outage_suggest_minutes", 15)     # runtime below which the outage screen says "shut down now"
+OUTAGE_ORDER = cfg("outage_order", [])                     # iDRAC server ids, shut down first to last
+MAINT_COLOR = (150, 90, 255)
 HA_SYS = ("disk_free", "disk_use", "load_1m", "memory_use_percent", "processor_use", "processor_temperature")
 GPS_HEALTH = {0: "Receiver down", 1: "Unknown mode", 2: "Acquiring signal", 3: "Bad geometry",
               4: "Propagate mode", 5: "2D solution", 6: "3D solution", 7: "Position hold", 8: "Time valid"}
@@ -279,6 +283,7 @@ class Data:
         self.alert_label = ""       # HA label whose binary sensors raise alerts
         self.wpsd = None
         self.portmap = None
+        self.netclients = None
         self.ha_meta = {}
         self.ha_latency = None
         self.time = dict(server=None, fails=0, history=deque(maxlen=90), pi={})
@@ -318,6 +323,10 @@ class Data:
                "{% if state_attr(e, 'clients') is not none %}{% set npm.e = e %}{% endif %}{% endfor %}"
                "{% if npm.e %}{{ {'state': states(npm.e), 'attrs': (expand(npm.e) | first).attributes} | tojson }}"
                "{% else %}null{% endif %}, "
+               "\"netclients\": {% set nnc = namespace(e=none) %}"
+               "{% for e in integration_entities('mqtt') | select('is_device_attr', 'model', '" + PORTMAP_MODEL + "') %}"
+               "{% if state_attr(e, 'network') is not none %}{% set nnc.e = e %}{% endif %}{% endfor %}"
+               "{% if nnc.e %}{{ state_attr(nnc.e, 'network') | tojson }}{% else %}null{% endif %}, "
                "\"ha\": {{ {"
                "'core': state_attr('update.home_assistant_core_update', 'installed_version'), "
                "'core_latest': state_attr('update.home_assistant_core_update', 'latest_version'), "
@@ -373,6 +382,7 @@ class Data:
                     self.ents, self.s250, self.ha_ok_at, self.ha_err = ents, j.get("s250"), time.time(), ""
                     self.wpsd, self.ha_meta, self.ha_latency = j.get("wpsd"), j.get("ha") or {}, r.elapsed.total_seconds()
                     self.portmap = j.get("portmap")
+                    self.netclients = j.get("netclients")
                     self.labels = j.get("labels") or []
                 self._render_user_templates()
             except Exception as e:
@@ -493,7 +503,7 @@ class Data:
 
     def snapshot(self):
         with self.lock:
-            t = dict(self.time, history=list(self.time["history"]), s250=self.s250, wpsd=self.wpsd, portmap=self.portmap,
+            t = dict(self.time, history=list(self.time["history"]), s250=self.s250, wpsd=self.wpsd, portmap=self.portmap, netclients=self.netclients,
                      labels=list(getattr(self, "labels", [])), rules=list(self.rules), tvals=dict(self.tvals),
                      ha_meta=dict(self.ha_meta), ha_latency=self.ha_latency)
             return dict(self.ents), self.ha_ok_at, self.ha_err, list(self.switches), dict(self.pings), t
@@ -866,6 +876,16 @@ def build_model(data):
     m["portmap"] = dict(present=bool(pm), live=bool(pm) and pm.get("state") not in BAD,
                         clients=pa.get("clients") or [], ports=pa.get("ports") or [],
                         switch=pa.get("switch_name"), model=pa.get("switch_model"), updated=pa.get("updated"))
+    nc = tdata.get("netclients")
+    if nc:                         # add-on 1.1+: every client, wired and Wi-Fi
+        m["netclients"] = [dict(mac=(c.get("m") or "").lower(), name=c.get("n"), ip=c.get("ip"), wired=bool(c.get("w")),
+                                at=c.get("at"), net=c.get("net"), first_seen=c.get("fs")) for c in nc if c.get("m")]
+        m["netclients_scope"] = "all"
+    else:                          # older add-on: wired clients of the port-map switch
+        m["netclients"] = [dict(mac=(c.get("mac") or "").lower(), name=c.get("name"), ip=c.get("ip"), wired=True,
+                                at=f"{m['portmap']['switch'] or 'switch'} port {c.get('port')}", net=c.get("network"),
+                                first_seen=None) for c in m["portmap"]["clients"] if c.get("mac")]
+        m["netclients_scope"] = "switch"
 
     # --- lights
     def light(e):
@@ -991,7 +1011,9 @@ def view_fields(m, data):
     # --- cooling
     rpms = [f["rpm"] for fc in m["fanctl"] for f in fc["fans"] if f["fitted"] and f["rpm"]]
     temps = [s["temp"] for s in m["switches"] if s["temp"] is not None]
-    m["summary"] = dict(fan_avg=sum(rpms) / len(rpms) if rpms else None, switch_tmax=max(temps) if temps else None)
+    stemps = [t["f"] for s in m["servers"] if s["on"] for t in s["temps"] if t.get("f") is not None]
+    m["summary"] = dict(fan_avg=sum(rpms) / len(rpms) if rpms else None, switch_tmax=max(temps) if temps else None,
+                        server_tmax=max(stemps) if stemps else None)
     for fc in m["fanctl"]:
         fc["color"] = sevc(fc["sev"], "ok")
         fc["esp_text"] = "OFFLINE" if fc["offline"] else f"ESP32 {fmt(fc['esp'], fc['esp_u'])}"
@@ -1081,6 +1103,7 @@ def view_fields(m, data):
         t["delay_text"] = f"delay {srv['delay'] * 1000:.2f} ms"
         t["jitter_text"] = f"jitter {t['jitter'] * 1000:.3f} ms" if t["jitter"] is not None else "jitter …"
     hist = t["history"]
+    t["offset_us"] = srv["offset"] * 1e6 if t["measured"] else None
     t["history_text"] = f"offset history · last {max(1, round((hist[-1][0] - hist[0][0]) / 60))} min" if len(hist) > 1 else ""
     t["lan_ports"] = [dict(n=i + 1, up=p == "up", text=f"{i + 1} {'up' if p == 'up' else '—'}",
                            color="ok" if p == "up" else "dim", tcolor="ok" if p == "up" else "muted")
@@ -1230,6 +1253,18 @@ class UI:
         self.hist = {}             # ref -> deque[(t, value)] for history graphs
         self.web_q = _queue.Queue()
         self.draft = None          # (screen dict, time) being edited in the builder
+        self.outage = None         # {"since": epoch} while the UPS runs on battery
+        self.maint = None          # {"since": epoch, "source": "door" | "manual"} during maintenance
+        self.prev_alerts = None    # alert key -> (sev, text), for the timeline
+        self.prev_power = {}       # server id -> power state, for the timeline
+        self.state_lock = threading.Lock()
+        import history as _history
+        self.history = _history.History(os.path.join(CONF_DIR, "history.db"), cfg("history_metrics", []))
+        self.notes = self._load_json("notes.json", {"notes": []})
+        self.known = self._load_json("known_devices.json", None)
+        st_ = self._load_json("state.json", {})
+        if (st_.get("maint") or {}).get("source") == "manual":
+            self.maint = st_["maint"]
         self.load_screens()
         if os.environ.get("RACKVIEW_NO_WEB") is None:
             try:
@@ -1426,7 +1461,224 @@ class UI:
         self.page = 0
 
     def _unacked(self):
+        if self.maint:                             # someone is working on the rack: no alarm, no wake-ups
+            return False
         return bool(self.model) and any(a.sev and a.key not in self.acked for a in self.model["alerts"])
+
+    # -- small JSON files in the config folder (notes, known devices, state)
+    def _load_json(self, name, default):
+        try:
+            with open(os.path.join(CONF_DIR, name), encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return default
+
+    def _save_json(self, name, data):
+        path = os.path.join(CONF_DIR, name)
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+        os.replace(path + ".tmp", path)
+
+    # -- maintenance mode
+    def maint_start(self, source):
+        if self.maint:
+            return
+        self.maint = {"since": time.time(), "source": source}
+        self.acked |= {a.key for a in (self.model or {}).get("alerts", [])}
+        self.history.event("maint", "Maintenance started" + (" (door opened)" if source == "door" else ""), 0)
+        self._save_json("state.json", {"maint": self.maint})
+        self.refresh_pages()
+
+    def maint_end(self, why=""):
+        if not self.maint:
+            return
+        mins = (time.time() - self.maint["since"]) / 60
+        self.maint = None
+        self.history.event("maint", f"Maintenance ended after {mins:.0f} min" + (f" ({why})" if why else ""), 0)
+        self._save_json("state.json", {"maint": None})
+        self.refresh_pages()
+
+    # -- scratchbook
+    def note_add(self, text):
+        with self.state_lock:
+            n = {"id": secrets.token_hex(4), "ts": time.time(), "text": str(text).strip()[:500], "pinned": False}
+            self.notes.setdefault("notes", []).insert(0, n)
+            self._save_json("notes.json", self.notes)
+        self.history.event("note", "Note: " + n["text"][:80], 0)
+        return n
+
+    def note_update(self, nid, **kw):
+        with self.state_lock:
+            for n in self.notes.get("notes", []):
+                if n["id"] == nid:
+                    n.update({k: v for k, v in kw.items() if k in ("text", "pinned")})
+            self._save_json("notes.json", self.notes)
+
+    def note_delete(self, nid):
+        with self.state_lock:
+            self.notes["notes"] = [n for n in self.notes.get("notes", []) if n["id"] != nid]
+            self._save_json("notes.json", self.notes)
+
+    # -- new devices
+    def device_ack(self, mac=None):
+        with self.state_lock:
+            for k, d in (self.known or {}).items():
+                if mac in (None, k):
+                    d["ack"] = True
+            self._save_json("known_devices.json", self.known)
+
+    def app_command(self, cmd):
+        """Actions buttons in screens can run inside RackView ("app" buttons)."""
+        name, _, arg = str(cmd).partition(":")
+        if name == "maint_toggle":
+            self.maint_end("ended on the touchscreen") if self.maint else self.maint_start("manual")
+        elif name == "maint_on":
+            self.maint_start("manual")
+        elif name == "maint_off":
+            self.maint_end()
+        elif name == "dev_ack":
+            self.device_ack(arg.lower())
+        elif name == "dev_ack_all":
+            self.device_ack(None)
+        elif name == "note_pin":
+            n = next((x for x in self.notes.get("notes", []) if x["id"] == arg), None)
+            if n:
+                self.note_update(arg, pinned=not n.get("pinned"))
+        else:
+            self.notify(f"Unknown action {name}", WARN, 3)
+
+    @staticmethod
+    def when(ts):
+        t = time.localtime(ts)
+        return time.strftime("%H:%M", t) if time.strftime("%Y%m%d", t) == time.strftime("%Y%m%d") else time.strftime("%b %d %H:%M", t)
+
+    def app_model(self, m):
+        """Add RackView's own state to the model (outage, maintenance, notes, new devices, timeline) and
+        record history and timeline events."""
+        now = time.time()
+        A = m["alerts"]
+        # power outage: the UPS runs on battery
+        ups = m["ups"]
+        st_ = str(ups.get("status") or "")
+        on_batt = ups.get("present") and st_ not in BAD and (
+            "on battery" in st_.lower() or st_.upper().split()[:1] == ["OB"] or ("discharg" in st_.lower() and "online" not in st_.lower()))
+        if os.environ.get("RACKVIEW_FAKE_OUTAGE"):
+            on_batt = True
+        if on_batt and not self.outage:
+            self.outage = {"since": now}
+            self.history.event("outage", "Power outage: UPS on battery", 2, f"battery {fmt(ups['batt'], '%')}, runtime {fmt(ups['runtime'], ' min')}")
+            self.refresh_pages()
+            if "outage" in self.PAGES:
+                self.goto("outage")
+                self.last_input = time.monotonic()
+                if not self.screen_on:
+                    self._set_screen(True)
+        elif not on_batt and self.outage and not os.environ.get("RACKVIEW_FAKE_OUTAGE"):
+            mins = (now - self.outage["since"]) / 60
+            self.outage = None
+            self.history.event("outage", f"Mains back after {mins:.0f} min", 0)
+            self.refresh_pages()
+        o = dict(active=bool(self.outage))
+        if self.outage:
+            mins = (now - self.outage["since"]) / 60
+            runtime = ups.get("runtime")
+            order = {sid: i for i, sid in enumerate(OUTAGE_ORDER)}
+            servers = sorted(m["servers"], key=lambda s: (s["essential"], order.get(s["id"], 99), s["name"]))
+            plan = []
+            for s in servers:
+                state = "on" if s["on"] else "off" if s["power"] == "off" else "?"
+                plan.append(dict(id=s["id"], name=s["name"], watts=s["watts"], essential=s["essential"],
+                                 can_soft=bool(s["can"].get("soft")) and not s["essential"], on=s["on"],
+                                 note="essential · keep running" if s["essential"] else ("already off" if state == "off" else "running"),
+                                 color="ok" if s["essential"] and s["on"] else "dim" if not s["on"] else "warn"))
+            low = runtime is not None and runtime < OUTAGE_SUGGEST_MIN
+            o.update(since_text=time.strftime("%H:%M", time.localtime(self.outage["since"])), minutes=mins,
+                     runtime=runtime, low=low, plan=plan,
+                     advice=(f"Runtime under {OUTAGE_SUGGEST_MIN} min: shut down the non-essential servers now"
+                             if low else "Runtime is fine. Shut servers down early to stretch it."),
+                     advice_color="crit" if low else "muted", runtime_color="crit" if low else "text")
+        m["outage"] = o
+        # maintenance
+        if self.maint:
+            mm = (now - self.maint["since"]) / 60
+            m["maint"] = dict(active=True, minutes=mm, source=self.maint["source"],
+                              text=f"MAINTENANCE · {mm:.0f} min" + (" · door open" if self.maint["source"] == "door" else ""))
+        else:
+            m["maint"] = dict(active=False, text="")
+        # scratchbook
+        notes = sorted(self.notes.get("notes", []), key=lambda n: (not n.get("pinned"), -n.get("ts", 0)))
+        m["notes"] = [dict(n, when=self.when(n.get("ts", 0)), color="accent" if n.get("pinned") else "card2",
+                           pin_label="Unpin" if n.get("pinned") else "Pin") for n in notes]
+        # new devices
+        ncs = m.get("netclients") or []
+        if ncs:
+            with self.state_lock:
+                if self.known is None:            # first time: everything on the network now is known
+                    self.known = {c["mac"]: {"name": c["name"], "first": now, "ack": True} for c in ncs}
+                    self._save_json("known_devices.json", self.known)
+                    self.history.event("devices", f"Learned {len(ncs)} devices on the network", 0)
+                fresh = [c for c in ncs if c["mac"] not in self.known]
+                for c in fresh:
+                    self.known[c["mac"]] = {"name": c["name"], "first": now, "ack": False}
+                    self.history.event("device", f"New device: {c['name']}", 1, f"{c.get('ip') or ''} · {c.get('at') or ''}")
+                if fresh:
+                    self._save_json("known_devices.json", self.known)
+        byk = {c["mac"]: c for c in ncs}
+        new = []
+        for mac, d in (self.known or {}).items():
+            if not d.get("ack"):
+                c = byk.get(mac, {})
+                new.append(dict(mac=mac, name=c.get("name") or d.get("name") or mac, ip=c.get("ip") or "—",
+                                at=c.get("at") or "not connected now", net=c.get("net") or "", when=self.when(d.get("first", now))))
+                A.append(Alert(1, "timeline", f"newdev-{mac}", f"New device: {c.get('name') or d.get('name') or mac}",
+                               f"{c.get('ip') or ''} {c.get('at') or ''}".strip()))
+        new.sort(key=lambda d: d["when"], reverse=True)
+        m["devices_new"] = new
+        m["devices_count"] = len(ncs)
+        m["summary"]["clients"] = len(ncs) or None
+        m["summary"]["alerts"] = len(A)
+        if self.maint:
+            for a in A:
+                self.acked.add(a.key)
+        # alerts again (new devices added some), sorted, per page
+        A.sort(key=lambda a: -a.sev)
+        m["page_sev"] = {}
+        for a in A:
+            m["page_sev"][a.page] = max(m["page_sev"].get(a.page, 0), a.sev)
+        m["overall"] = max((a.sev for a in A), default=0)
+        m["page_sev"]["overview"] = m["overall"]
+        # timeline: alerts raised / cleared, servers powered on / off
+        if m["ha_age"] is not None and m["ha_age"] < 30:
+            cur = {a.key: (a.sev, a.text, a.detail) for a in A if not a.key.startswith("newdev-")}
+            if self.prev_alerts is not None:
+                for k, (sev, text, detail) in cur.items():
+                    if k not in self.prev_alerts:
+                        self.history.event("alert", text, sev, detail)
+                for k, (sev, text, _d) in self.prev_alerts.items():
+                    if k not in cur:
+                        self.history.event("clear", "Cleared: " + text, 0)
+            self.prev_alerts = cur
+            for sv in m["servers"]:
+                was = self.prev_power.get(sv["id"])
+                if was and sv["power"] not in BAD and was != sv["power"]:
+                    self.history.event("power", f"{sv['name']} powered {sv['power']}", 0)
+                if sv["power"] not in BAD:
+                    self.prev_power[sv["id"]] = sv["power"]
+        evs = self.history.events(40)
+        icon = {"alert": None, "clear": "ok", "door": "info", "maint": "purple", "outage": "crit", "device": "warn",
+                "devices": "info", "note": "teal", "power": "info"}
+        m["events"] = [dict(e, when=self.when(e["ts"]),
+                            color=icon.get(e["kind"]) or {0: "info", 1: "warn", 2: "crit"}.get(e["sev"], "info"))
+                       for e in evs]
+        # history: one value per metric per minute
+        vals = {}
+        for key, _label, _unit in self.history.metrics:
+            v = eng.dig(m, key) if not key.split("@")[0] in m.get("ents", {}) else self.engine.resolve(key)
+            try:
+                vals[key] = float(v)
+            except (TypeError, ValueError):
+                pass
+        self.history.record(vals)
 
     # -- LEDs
     def _live_led(self, i):
@@ -1469,7 +1721,11 @@ class UI:
             mid = (SEV_LED[m["overall"]], "glow")
 
         # arrows: the current page's colour (bright on arrival, then a soft glow)
-        if page == "lights" and self.wled.zone_colours() is not None:
+        if self.outage:
+            arrow_top = arrow_bot = (SEV_LED[1], "pulse")
+        elif self.maint and page != "lights":
+            arrow_top = arrow_bot = (tuple(int(c * 0.6) for c in MAINT_COLOR), "glow")
+        elif page == "lights" and self.wled.zone_colours() is not None:
             arrow_top = arrow_bot = ((0, 0, 0), "live")
         else:
             led = PAGE_COLORS.get(page, ((0, 0, 0), (60, 60, 60)))[1]
@@ -1498,12 +1754,20 @@ class UI:
         if ps == DOOR_OPEN_PRESET:
             self.door, self.sleep_at = "open", None
             if not first:
+                self.history.event("door", "Rack door opened", 0)
+            if not self.maint:
+                self.maint_start("door")
+            if not first:
                 self.last_input = now
                 self.page = 0
                 if not self.screen_on:
                     self._set_screen(True)
         elif ps == DOOR_CLOSED_PRESET:
             self.door = "closed"
+            if not first:
+                self.history.event("door", "Rack door closed", 0)
+            if self.maint and self.maint.get("source") == "door":
+                self.maint_end("door closed")
             self.sleep_at = now + (0 if first else DOOR_SLEEP_DELAY)
             self.last_input = max(self.last_input, now - DOOR_CLOSED_IDLE + DOOR_SLEEP_DELAY)
 
@@ -1525,6 +1789,16 @@ class UI:
         tr = self.T(self.TITLES[page], 24, TEXT, (14, 9), bold=True)
         self.pg.draw.rect(c, PAGE_COLORS.get(page, (MUTED, None))[0], (tr.x, tr.bottom + 1, tr.w, 3), border_radius=2)
         sub = self.subtitle or ""
+        if self.maint and m:
+            self.pg.draw.rect(c, MAINT_COLOR, (0, 0, CW, 3))
+            if not sub:
+                label = m["maint"]["text"]
+                cw_ = self.F(12, True).size(label)[0] + 18
+                chip = self.pg.Rect(tr.right + 14, 13, cw_, 22)
+                self.pg.draw.rect(c, self.tint(MAINT_COLOR, 0.45), chip, border_radius=11)
+                self.T(label, 12, TEXT, chip.center, "center", bold=True)
+                self.hit(chip.inflate(10, 16), lambda: self.ask("End maintenance?", ["Alerts wake the screen and pulse again."],
+                                                                lambda: self.maint_end("ended on the touchscreen")))
         if page in self.custom and self.cdetail:
             d = self.detail_screen(page, self.cdetail[0])
             it = self.cdetail[1]
@@ -1657,6 +1931,25 @@ class UI:
     def factory_screen(self, sid):
         return next((x for x in self.default_screens()["screens"] if x["id"] == sid), None)
 
+    def add_new_factory(self, cfg_):
+        """Add factory screens that appeared in a code update (once; deleting one later is respected)."""
+        seen = set(cfg_.get("factory_seen") or [])
+        have = {x.get("id") for x in cfg_.get("screens", [])}
+        changed = False
+        if not seen:                              # first run of this feature: everything present counts as seen
+            seen = set(have) | {"overview", "power", "servers", "network", "ports", "time", "hotspot", "ha",
+                                "cooling", "lights"}
+            changed = True
+        for x in self.default_screens()["screens"]:
+            if x["id"] not in seen:
+                seen.add(x["id"])
+                changed = True
+                if x["id"] not in have:
+                    cfg_.setdefault("screens", []).append(x)
+                    print("screens: added new factory screen", x["id"], flush=True)
+        cfg_["factory_seen"] = sorted(seen)
+        return changed
+
     def migrate_builtin(self, cfg_):
         """Replace old one-line "builtin" screens with their full factory layout. Returns True if changed."""
         changed = False
@@ -1689,12 +1982,14 @@ class UI:
         except ValueError as e:
             print("screens: invalid JSON, using the factory layouts:", e, flush=True)
             cfg_ = self.default_screens()
-        if self.migrate_builtin(cfg_):
+        changed = self.migrate_builtin(cfg_)
+        changed = self.add_new_factory(cfg_) or changed
+        if changed:
             try:
                 os.replace(SCREENS_FILE, SCREENS_FILE + ".pre-layouts")
                 with open(SCREENS_FILE, "w", encoding="utf-8") as f:
                     json.dump(cfg_, f, indent=1)
-                print("screens: built-in pages converted to editable layouts", flush=True)
+                print("screens: updated to the current factory layouts (saved the old file as .pre-layouts)", flush=True)
             except OSError as e:
                 print("screens: cannot save converted layouts:", e, flush=True)
         self.apply_screens(cfg_)
@@ -1706,7 +2001,8 @@ class UI:
             cfg_ = self.default_screens()
             screens = cfg_["screens"]
         self.screens_cfg = cfg_
-        self.PAGES = [x["id"] for x in screens]
+        self.all_screens = screens
+        self.PAGES = [x["id"] for x in screens if self.screen_visible(x)]
         self.TITLES = dict(UI.TITLES, **{x["id"]: x.get("title") or x["id"] for x in screens})
         self.custom = {}
         for x in screens:
@@ -1723,6 +2019,15 @@ class UI:
         self.data.alert_label = cfg_.get("alertLabel") or ""
         self.refresh_watch()
         self.data.refresh.set()
+
+    def screen_visible(self, x):
+        when = x.get("show_when")
+        return not when or (when == "outage" and self.outage) or (when == "maintenance" and self.maint)
+
+    def refresh_pages(self):
+        cur = self.PAGES[self.page] if self.PAGES else None
+        self.PAGES = [x["id"] for x in self.all_screens if self.screen_visible(x)]
+        self.page = self.PAGES.index(cur) if cur in self.PAGES else 0
 
     def refresh_watch(self):
         """Concrete entities (full attributes) and templates the custom screens need, expanded per item."""
@@ -1913,6 +2218,8 @@ class UI:
             try:
                 if req[0] == "reload":
                     self.load_screens()
+                elif req[0] == "app":
+                    self.app_command(req[1])
                 elif req[0] == "show":
                     _, page, did = req[:3]
                     if page in self.PAGES:
@@ -2092,6 +2399,8 @@ class UI:
         self.T(f"http://{local_ip()}:{WEB_PORT}", 13, INFO, (r.x + 14, y + 22), maxw=r.w - 28)
         self.T("password set" if webui.has_password() else "no password yet: first visitor sets it", 12, DIM,
                (r.x + 14, y + 40), maxw=r.w - 28)
+        self.button((r.x + 12, r.bottom - 92, r.w - 24, 36), "End maintenance" if self.maint else "Start maintenance",
+                    lambda: (setattr(self, "help", False), self.app_command("maint_toggle")), col=(150, 90, 255), size=14)
         self.button((r.x + 12, r.bottom - 48, r.w - 24, 36), "Reset builder password",
                     lambda: setattr(self, "help", False) or self.ask("Reset the builder password?",
                                      ["The next person to open the builder page", "chooses a new password."],
@@ -2532,14 +2841,16 @@ class UI:
             now = time.monotonic()
             if now - last_model >= 1.0:
                 last_model = now
-                self.model = build_model(self.data)
+                m_ = build_model(self.data)
+                self.app_model(m_)
+                self.model = m_
                 self.refresh_watch()
                 self.sample_history()
                 crit = {a.key for a in self.model["alerts"] if a.sev == 2}
                 new = crit - self.seen_crit - self.acked
                 self.seen_crit = crit
                 self.acked &= {a.key for a in self.model["alerts"]}   # forget cleared alerts
-                if new and self.model["ha_age"] is not None:
+                if new and self.model["ha_age"] is not None and not self.maint:
                     self.page = 0
                     self.last_input = now
                     if not self.screen_on:

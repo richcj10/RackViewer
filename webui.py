@@ -459,6 +459,57 @@ def create_app(ui):
         bk.saved(f"Restored git backup {p.get('sha')}")
         return applied(restart)
 
+    # ---------------------------------------------------------------- operations: maintenance, notes, devices, history
+    @app.route("/api/ops")
+    def ops():
+        m = ui.model or {}
+        return jsonify(json.loads(json.dumps(dict(
+            maint=m.get("maint"), outage=m.get("outage"), devices_new=m.get("devices_new") or [],
+            devices_count=m.get("devices_count"), devices_scope=m.get("netclients_scope"),
+            notes=m.get("notes") or [], history_mb=round(ui.history.size_mb(), 1)), default=str)))
+
+    @app.route("/api/maintenance", methods=["POST"])
+    def maintenance():
+        on = bool((request.get_json(silent=True) or {}).get("on"))
+        ui.web_q.put(("app", "maint_on" if on else "maint_off"))
+        return jsonify(ok=True)
+
+    @app.route("/api/notes", methods=["GET", "POST"])
+    def notes():
+        if request.method == "POST":
+            text = ((request.get_json(silent=True) or {}).get("text") or "").strip()
+            if not text:
+                return jsonify(error="Write something first."), 400
+            n = ui.note_add(text)
+            bk.saved("Note added")
+            return jsonify(n)
+        return jsonify(ui.notes.get("notes", []))
+
+    @app.route("/api/notes/<nid>", methods=["PUT", "DELETE"])
+    def note(nid):
+        if request.method == "DELETE":
+            ui.note_delete(nid)
+            bk.saved("Note deleted")
+        else:
+            p = request.get_json(silent=True) or {}
+            ui.note_update(nid, **{k: p[k] for k in ("text", "pinned") if k in p})
+            bk.saved("Note changed")
+        return jsonify(ok=True)
+
+    @app.route("/api/devices/ack", methods=["POST"])
+    def devices_ack():
+        mac = (request.get_json(silent=True) or {}).get("mac")
+        ui.device_ack(mac.lower() if mac else None)
+        return jsonify(ok=True)
+
+    @app.route("/api/history/metrics")
+    def history_metrics():
+        return jsonify([{"key": k, "label": l, "unit": u} for k, l, u in ui.history.metrics])
+
+    @app.route("/api/events")
+    def events():
+        return jsonify(ui.history.events(int(request.args.get("limit") or 100)))
+
     @app.route("/api/status")
     def status():
         return jsonify(pages=ui.PAGES, page=ui.PAGES[ui.page] if ui.PAGES else None, screen_on=ui.screen_on,

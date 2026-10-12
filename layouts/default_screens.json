@@ -4173,6 +4173,1012 @@
     ]
    },
    "details": []
+  },
+  {
+   "id": "timeline",
+   "title": "Timeline",
+   "color": "#9b8cff",
+   "enabled": true,
+   "middle": "home",
+   "root": {
+    "id": "tl31",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420
+    },
+    "children": [
+     {
+      "id": "tl10",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 380,
+       "h": 420,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "tl1",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "What happened",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "tl2",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 12,
+         "w": 100,
+         "r": 14,
+         "text": "newest first",
+         "size": 12,
+         "color": "dim",
+         "align": "right"
+        }
+       },
+       {
+        "id": "tl3",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 40,
+         "text": "Nothing yet: events appear as they happen.",
+         "size": 14,
+         "color": "dim",
+         "show_if": {
+          "ref": "$events",
+          "op": "is_empty"
+         }
+        }
+       },
+       {
+        "id": "tl9",
+        "type": "repeater",
+        "props": {
+         "x": 8,
+         "y": 34,
+         "w": 364,
+         "h": 380,
+         "source": "model",
+         "path": "$events",
+         "empty": "",
+         "max": 10,
+         "mode": "all",
+         "columns": 1,
+         "row_h": 38,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "tl8",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 38
+          },
+          "children": [
+           {
+            "id": "tl4",
+            "type": "dot",
+            "props": {
+             "x": 5,
+             "y": 5,
+             "w": 10,
+             "h": 10,
+             "color": "@color",
+             "radius": 5
+            }
+           },
+           {
+            "id": "tl5",
+            "type": "label",
+            "props": {
+             "x": 22,
+             "y": 2,
+             "w": 86,
+             "text": "${@when}",
+             "size": 12,
+             "color": "muted"
+            }
+           },
+           {
+            "id": "tl6",
+            "type": "label",
+            "props": {
+             "x": 100,
+             "y": 0,
+             "r": 4,
+             "text": "${@text}",
+             "size": 14
+            }
+           },
+           {
+            "id": "tl7",
+            "type": "label",
+            "props": {
+             "x": 100,
+             "y": 19,
+             "r": 4,
+             "text": "${@detail|or:}",
+             "size": 11,
+             "color": "dim"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "tl30",
+      "type": "free",
+      "props": {
+       "x": 388,
+       "y": 0,
+       "w": 270,
+       "h": 420
+      },
+      "children": [
+       {
+        "id": "tl20",
+        "type": "free",
+        "props": {
+         "x": 0,
+         "y": 0,
+         "w": 270,
+         "h": 156,
+         "bg": "card"
+        },
+        "children": [
+         {
+          "id": "tl11",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 10,
+           "text": "New devices",
+           "size": 15,
+           "color": "muted"
+          }
+         },
+         {
+          "id": "tl12",
+          "type": "label",
+          "props": {
+           "x": 0,
+           "y": 12,
+           "w": 130,
+           "r": 14,
+           "text": "${$devices_count|or:0} on the network",
+           "size": 12,
+           "color": "dim",
+           "align": "right"
+          }
+         },
+         {
+          "id": "tl13",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 44,
+           "text": "Nothing new on the network.",
+           "size": 14,
+           "color": "ok",
+           "show_if": {
+            "ref": "$devices_new",
+            "op": "is_empty"
+           }
+          }
+         },
+         {
+          "id": "tl14",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 66,
+           "r": 14,
+           "text": "Alerts here when a device joins that wasn't seen before.",
+           "size": 12,
+           "color": "dim",
+           "wrap": 2,
+           "show_if": {
+            "ref": "$devices_new",
+            "op": "is_empty"
+           }
+          }
+         },
+         {
+          "id": "tl18",
+          "type": "repeater",
+          "props": {
+           "x": 10,
+           "y": 34,
+           "w": 250,
+           "h": 76,
+           "source": "model",
+           "path": "$devices_new",
+           "empty": "",
+           "max": 2,
+           "mode": "all",
+           "columns": 1,
+           "row_h": 38,
+           "gap_y": 0
+          },
+          "children": [
+           {
+            "id": "tl17",
+            "type": "free",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "h": 38
+            },
+            "children": [
+             {
+              "id": "tl15",
+              "type": "label",
+              "props": {
+               "x": 4,
+               "y": 0,
+               "r": 4,
+               "text": "${@name}",
+               "size": 14,
+               "color": "warn",
+               "bold": true
+              }
+             },
+             {
+              "id": "tl16",
+              "type": "label",
+              "props": {
+               "x": 4,
+               "y": 19,
+               "r": 4,
+               "text": "${@ip} · ${@at}",
+               "size": 11,
+               "color": "muted"
+              }
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "id": "tl19",
+          "type": "button",
+          "props": {
+           "x": 10,
+           "y": 112,
+           "h": 34,
+           "r": 10,
+           "label": "Mark all known",
+           "action": "app",
+           "command": "dev_ack_all",
+           "color": "info",
+           "size": 13,
+           "exact": true,
+           "show_if": {
+            "ref": "$devices_new",
+            "op": "not_empty"
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "tl23",
+        "type": "free",
+        "props": {
+         "x": 0,
+         "y": 164,
+         "w": 270,
+         "h": 86,
+         "bg": "card"
+        },
+        "children": [
+         {
+          "id": "tl21",
+          "type": "label",
+          "props": {
+           "x": 12,
+           "y": 6,
+           "w": 150,
+           "text": "UPS load · 24 h",
+           "size": 13,
+           "color": "muted"
+          }
+         },
+         {
+          "id": "tl22",
+          "type": "graph",
+          "props": {
+           "x": 10,
+           "y": 26,
+           "w": 250,
+           "h": 52,
+           "history": "ups.load",
+           "minutes": 1440,
+           "caption": "%",
+           "color": "info"
+          }
+         }
+        ]
+       },
+       {
+        "id": "tl26",
+        "type": "free",
+        "props": {
+         "x": 0,
+         "y": 254,
+         "w": 270,
+         "h": 86,
+         "bg": "card"
+        },
+        "children": [
+         {
+          "id": "tl24",
+          "type": "label",
+          "props": {
+           "x": 12,
+           "y": 6,
+           "w": 150,
+           "text": "Rack power · 24 h",
+           "size": 13,
+           "color": "muted"
+          }
+         },
+         {
+          "id": "tl25",
+          "type": "graph",
+          "props": {
+           "x": 10,
+           "y": 26,
+           "w": 250,
+           "h": 52,
+           "history": "pdu.watts",
+           "minutes": 1440,
+           "caption": "W",
+           "color": "info"
+          }
+         }
+        ]
+       },
+       {
+        "id": "tl29",
+        "type": "free",
+        "props": {
+         "x": 0,
+         "y": 344,
+         "w": 270,
+         "h": 86,
+         "bg": "card"
+        },
+        "children": [
+         {
+          "id": "tl27",
+          "type": "label",
+          "props": {
+           "x": 12,
+           "y": 6,
+           "w": 150,
+           "text": "Internet ping · 24 h",
+           "size": 13,
+           "color": "muted"
+          }
+         },
+         {
+          "id": "tl28",
+          "type": "graph",
+          "props": {
+           "x": 10,
+           "y": 26,
+           "w": 250,
+           "h": 52,
+           "history": "inet.ms",
+           "minutes": 1440,
+           "caption": "ms",
+           "color": "info"
+          }
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "details": []
+  },
+  {
+   "id": "notes",
+   "title": "Scratchbook",
+   "color": "#2ec4b6",
+   "enabled": true,
+   "middle": "home",
+   "root": {
+    "id": "nb11",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420,
+     "bg": "card"
+    },
+    "children": [
+     {
+      "id": "nb1",
+      "type": "label",
+      "props": {
+       "x": 14,
+       "y": 10,
+       "text": "Notes about the rack",
+       "size": 15,
+       "color": "muted"
+      }
+     },
+     {
+      "id": "nb2",
+      "type": "label",
+      "props": {
+       "x": 0,
+       "y": 12,
+       "w": 300,
+       "r": 14,
+       "text": "write and edit them in the builder · Notes",
+       "size": 12,
+       "color": "dim",
+       "align": "right"
+      }
+     },
+     {
+      "id": "nb3",
+      "type": "label",
+      "props": {
+       "x": 14,
+       "y": 44,
+       "r": 14,
+       "text": "No notes yet. Open the builder and add one, e.g. which drive was replaced.",
+       "size": 15,
+       "color": "dim",
+       "wrap": 2,
+       "show_if": {
+        "ref": "$notes",
+        "op": "is_empty"
+       }
+      }
+     },
+     {
+      "id": "nb10",
+      "type": "repeater",
+      "props": {
+       "x": 10,
+       "y": 36,
+       "w": 638,
+       "h": 380,
+       "source": "model",
+       "path": "$notes",
+       "empty": "",
+       "max": 5,
+       "mode": "all",
+       "columns": 1,
+       "row_h": 76,
+       "gap_y": 0
+      },
+      "children": [
+       {
+        "id": "nb9",
+        "type": "free",
+        "props": {
+         "x": 0,
+         "y": 0,
+         "h": 76
+        },
+        "children": [
+         {
+          "id": "nb4",
+          "type": "box",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "w": 638,
+           "h": 70,
+           "color": "card2",
+           "radius": 8
+          }
+         },
+         {
+          "id": "nb5",
+          "type": "box",
+          "props": {
+           "x": 0,
+           "y": 8,
+           "w": 4,
+           "h": 54,
+           "color": "@color",
+           "radius": 2
+          }
+         },
+         {
+          "id": "nb6",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 8,
+           "r": 100,
+           "text": "${@text}",
+           "size": 15,
+           "wrap": 2
+          }
+         },
+         {
+          "id": "nb7",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 50,
+           "w": 200,
+           "text": "${@when}",
+           "size": 11,
+           "color": "muted"
+          }
+         },
+         {
+          "id": "nb8",
+          "type": "button",
+          "props": {
+           "y": 16,
+           "w": 80,
+           "h": 36,
+           "r": 10,
+           "label": "${@pin_label}",
+           "action": "app",
+           "command": "note_pin:{id}",
+           "color": "teal",
+           "size": 13,
+           "exact": true
+          }
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "details": []
+  },
+  {
+   "id": "outage",
+   "title": "Power Outage",
+   "color": "#f85149",
+   "enabled": true,
+   "middle": "silence",
+   "root": {
+    "id": "po31",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420
+    },
+    "children": [
+     {
+      "id": "po1",
+      "type": "box",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 658,
+       "h": 96,
+       "color": "crit",
+       "tint": 0.3,
+       "radius": 12,
+       "pulse": "$outage.low"
+      }
+     },
+     {
+      "id": "po2",
+      "type": "box",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 658,
+       "h": 96,
+       "color": "none",
+       "border": "crit",
+       "bw": 2,
+       "radius": 12
+      }
+     },
+     {
+      "id": "po3",
+      "type": "label",
+      "props": {
+       "x": 18,
+       "y": 10,
+       "w": 330,
+       "text": "ON BATTERY",
+       "size": 30,
+       "color": "crit",
+       "bold": true
+      }
+     },
+     {
+      "id": "po4",
+      "type": "label",
+      "props": {
+       "x": 20,
+       "y": 50,
+       "w": 360,
+       "text": "Mains lost at ${$outage.since_text} · ${$outage.minutes|d:0} min ago",
+       "size": 15
+      }
+     },
+     {
+      "id": "po5",
+      "type": "label",
+      "props": {
+       "x": 20,
+       "y": 72,
+       "w": 360,
+       "text": "UPS ${$ups.status|or:?}",
+       "size": 12,
+       "color": "sand"
+      }
+     },
+     {
+      "id": "po6",
+      "type": "label",
+      "props": {
+       "x": 0,
+       "y": 6,
+       "w": 260,
+       "r": 18,
+       "text": "${$outage.runtime|d:0} min",
+       "size": 46,
+       "color": "$outage.runtime_color",
+       "bold": true,
+       "align": "right"
+      }
+     },
+     {
+      "id": "po7",
+      "type": "label",
+      "props": {
+       "x": 0,
+       "y": 66,
+       "w": 200,
+       "r": 20,
+       "text": "runtime left",
+       "size": 13,
+       "color": "sand",
+       "align": "right"
+      }
+     },
+     {
+      "id": "po20",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 104,
+       "w": 320,
+       "h": 316,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "po8",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "UPS",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "po9",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 32,
+         "w": 160,
+         "text": "${$ups.batt|d:0|u:%}",
+         "size": 40,
+         "bold": true
+        }
+       },
+       {
+        "id": "po10",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 50,
+         "w": 100,
+         "r": 14,
+         "text": "battery",
+         "size": 13,
+         "color": "muted",
+         "align": "right"
+        }
+       },
+       {
+        "id": "po11",
+        "type": "bar",
+        "props": {
+         "x": 14,
+         "y": 84,
+         "w": 292,
+         "h": 10,
+         "value": "$ups.batt",
+         "max": 100,
+         "color": {
+          "ref": "$outage.low",
+          "map": {
+           "true": "crit"
+          },
+          "default": "warn"
+         }
+        }
+       },
+       {
+        "id": "po12",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 104,
+         "text": "Load",
+         "size": 14,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "po13",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 104,
+         "w": 80,
+         "r": 14,
+         "text": "${$ups.load|d:0|u:%}",
+         "size": 14,
+         "align": "right"
+        }
+       },
+       {
+        "id": "po14",
+        "type": "bar",
+        "props": {
+         "x": 14,
+         "y": 124,
+         "w": 292,
+         "h": 8,
+         "value": "$ups.load",
+         "max": 100,
+         "color": "$ups.load_color"
+        }
+       },
+       {
+        "id": "po15",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 146,
+         "r": 14,
+         "label": "Rack power",
+         "text": "${$pdu.watts|d:0|u: W}",
+         "size": 15
+        }
+       },
+       {
+        "id": "po16",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 170,
+         "r": 14,
+         "label": "Mains voltage",
+         "text": "${$ups.vin|d:0|u: V}",
+         "size": 15
+        }
+       },
+       {
+        "id": "po17",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 194,
+         "r": 14,
+         "label": "Battery voltage",
+         "text": "${$ups.bvolt|d:1|u: V}",
+         "size": 15
+        }
+       },
+       {
+        "id": "po18",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 218,
+         "r": 14,
+         "label": "Internet",
+         "text": "${$inet.ms|d:0|u: ms|or:DOWN}",
+         "size": 15
+        }
+       },
+       {
+        "id": "po19",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 252,
+         "r": 14,
+         "text": "Hard power-off is never offered; shutdowns are soft (ACPI) and need a 1.5 s hold.",
+         "size": 12,
+         "color": "dim",
+         "wrap": 3
+        }
+       }
+      ]
+     },
+     {
+      "id": "po30",
+      "type": "free",
+      "props": {
+       "x": 328,
+       "y": 104,
+       "w": 330,
+       "h": 316,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "po21",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "Shutdown plan",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "po22",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 32,
+         "r": 14,
+         "text": "${$outage.advice}",
+         "size": 13,
+         "color": "$outage.advice_color",
+         "bold": true,
+         "wrap": 2
+        }
+       },
+       {
+        "id": "po29",
+        "type": "repeater",
+        "props": {
+         "x": 10,
+         "y": 70,
+         "w": 310,
+         "h": 240,
+         "source": "model",
+         "path": "$outage.plan",
+         "empty": "",
+         "mode": "all",
+         "columns": 1,
+         "row_h": 54,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "po28",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 54
+          },
+          "children": [
+           {
+            "id": "po23",
+            "type": "box",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "w": 310,
+             "h": 48,
+             "color": "card2",
+             "radius": 8
+            }
+           },
+           {
+            "id": "po24",
+            "type": "box",
+            "props": {
+             "x": 0,
+             "y": 8,
+             "w": 4,
+             "h": 32,
+             "color": "@color",
+             "radius": 2
+            }
+           },
+           {
+            "id": "po25",
+            "type": "label",
+            "props": {
+             "x": 14,
+             "y": 6,
+             "w": 170,
+             "text": "${@name}",
+             "size": 16,
+             "bold": true
+            }
+           },
+           {
+            "id": "po26",
+            "type": "label",
+            "props": {
+             "x": 14,
+             "y": 27,
+             "w": 180,
+             "text": "${@note} · ${@watts|d:0|u: W|or:—}",
+             "size": 12,
+             "color": "muted"
+            }
+           },
+           {
+            "id": "po27",
+            "type": "button",
+            "props": {
+             "y": 6,
+             "w": 96,
+             "h": 36,
+             "r": 6,
+             "label": "Shut down",
+             "color": "warn",
+             "size": 13,
+             "exact": true,
+             "service": "button.press",
+             "target": "button.idrac_{id}_soft_shutdown",
+             "confirm": "hold",
+             "confirm_title": "Soft Shutdown: {item}?",
+             "danger": true,
+             "confirm_text": "Power outage: asks {item}'s OS to shut down cleanly\n(ACPI power button) to save UPS runtime.",
+             "show_if": {
+              "ref": "@can_soft",
+              "op": "==",
+              "value": true
+             }
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "details": [],
+   "show_when": "outage"
   }
  ]
 }
