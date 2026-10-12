@@ -14,11 +14,10 @@ header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:34px;m
 h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px}
 .live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
 .live i{width:8px;height:8px;border-radius:50%;background:#555}
-.live.on i{background:#3fb950;box-shadow:0 0 6px #3fb950}
+.live.on i{background:#3fb950}
 .chips{display:flex;gap:6px;flex-wrap:wrap;min-width:0;flex:1 1 200px}
 .chip{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
 .chip.maint{background:#2d1f4d;border-color:#6b4fd0;color:#cbb8ff}
-.spacer{flex:1}
 a.link{color:var(--accent);text-decoration:none;font-size:13px}
 main{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
 .stage{display:flex;gap:12px;align-items:stretch}
@@ -32,9 +31,11 @@ main{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
 .screen .msg[hidden]{display:none}
 .btns{flex:none;width:var(--col);height:288px;display:flex;flex-direction:column;justify-content:space-around;align-items:center;
   background:var(--panel);border:1px solid var(--line);border-radius:12px}
-.hb{width:44px;height:44px;border-radius:50%;border:2px solid #3a4652;background:#1d252c;
-  cursor:pointer;touch-action:none;transition:transform .08s;-webkit-tap-highlight-color:transparent;padding:0}
-.hb:active,.hb.down{transform:scale(.92)}
+.hb{width:44px;height:44px;border-radius:50%;border:2px solid #3a4652;background:#1d252c;color:var(--fg);
+  font-size:18px;line-height:1;display:grid;place-items:center;
+  cursor:pointer;touch-action:none;transition:transform .08s,background .08s;-webkit-tap-highlight-color:transparent;padding:0}
+.hb:hover{border-color:#556371}
+.hb.down{transform:scale(.92);background:#2b3640}
 .hb:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .hint{text-align:center;color:var(--muted);font-size:12px;margin-top:10px;line-height:1.5}
 kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-radius:4px;padding:0 4px}
@@ -46,7 +47,6 @@ kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-radius:
   <h1>RackView</h1>
   <span class="live" id="live"><i></i><span id="livetext">connecting…</span></span>
   <span class="chips" id="chips"></span>
-  <span class="spacer"></span>
   <a class="link" href="/">Builder</a>
 </header>
 <main>
@@ -56,9 +56,9 @@ kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-radius:
       <div class="msg" id="msg">Connecting to the rack…</div>
     </div>
     <div class="btns" aria-label="Rack buttons">
-      <button class="hb" data-b="0" aria-label="Top button: previous screen; hold for Overview"></button>
-      <button class="hb" data-b="1" aria-label="Middle button: the screen's action; hold to put the screen to sleep"></button>
-      <button class="hb" data-b="2" aria-label="Bottom button: next screen; hold for Help"></button>
+      <button class="hb" data-b="0" aria-label="Top button: previous screen; hold for Overview">▲</button>
+      <button class="hb" data-b="1" aria-label="Middle button: the screen's action; hold to put the screen to sleep">●</button>
+      <button class="hb" data-b="2" aria-label="Bottom button: next screen; hold for Help">▼</button>
     </div>
   </div>
 </main>
@@ -68,35 +68,53 @@ kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-radius:
 "use strict";
 const $ = id => document.getElementById(id);
 let S = {w: 800, h: 480, long_press: 0.9, rail_side: "right"};
-let streaming = false, lastState = 0;
+
+// every request has a timeout, so one that stalls (Wi-Fi, a sleeping phone) can never block the page
+async function req(url, opts = {}, ms = 5000) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(url, {cache: "no-store", ...opts, signal: ctl.signal});
+    if (r.status === 401) { location.href = "/login?next=/mirror"; throw new Error("login"); }
+    return r;
+  } finally {
+    clearTimeout(t);
+  }
+}
 
 // ---- input: sent in order, one request at a time
 let chain = Promise.resolve();
 function send(body) {
-  chain = chain.then(() => fetch("/api/mirror/input", {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(body)}).then(r => { if (r.status === 401) location.href = "/login?next=/mirror"; })
-  ).catch(() => {});
+  chain = chain.then(() => req("/api/mirror/input", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body)}, 4000)).catch(() => {});
 }
 
-// ---- the picture
-function startStream() {
-  if (streaming) return;
-  streaming = true;
-  $("img").src = "/api/mirror/stream?t=" + Date.now();
+// ---- the picture: ask for the next frame; the Pi answers as soon as the screen changes (or after ~2 s)
+let seq = -1, lastFrame = 0, running = false, shownUrl = null;
+async function frames() {
+  if (running) return;
+  running = true;
+  while (!document.hidden) {
+    try {
+      const r = await req("/api/mirror/frame?seq=" + seq, {}, 6000);
+      if (r.status === 200) {
+        seq = +(r.headers.get("X-Seq") || -1);
+        const url = URL.createObjectURL(await r.blob());
+        $("img").src = url;
+        if (shownUrl) URL.revokeObjectURL(shownUrl);
+        shownUrl = url;
+        lastFrame = Date.now();
+        $("msg").hidden = true;
+      } else if (r.status !== 204) {
+        await new Promise(res => setTimeout(res, 1000));
+      }
+    } catch (e) {
+      await new Promise(res => setTimeout(res, 1000));
+    }
+  }
+  running = false;
 }
-function stopStream() {
-  streaming = false;
-  $("img").removeAttribute("src");
-}
-$("img").addEventListener("load", () => { $("msg").hidden = true; });
-$("img").addEventListener("error", () => {
-  if (!streaming) return;
-  streaming = false;
-  $("msg").hidden = false;
-  $("msg").textContent = "Lost the connection, retrying…";
-  setTimeout(() => { if (!document.hidden) startStream(); }, 2000);
-});
-document.addEventListener("visibilitychange", () => document.hidden ? stopStream() : startStream());
+document.addEventListener("visibilitychange", () => { if (!document.hidden) { frames(); poll(); } });
 
 // ---- touches on the picture
 const scr = $("screen");
@@ -126,11 +144,12 @@ scr.addEventListener("pointerup", lift);
 scr.addEventListener("pointercancel", lift);
 scr.addEventListener("contextmenu", e => e.preventDefault());
 
-// ---- the three hardware buttons: short press, or long press after the rack's long-press time
+// ---- the three rack buttons: press, or hold for the long press (pointer events only, so one tap = one press)
 document.querySelectorAll(".hb").forEach(b => {
   const n = +b.dataset.b;
   let timer = null, fired = false;
   b.addEventListener("pointerdown", e => {
+    if (e.button > 0) return;
     b.setPointerCapture(e.pointerId);
     b.classList.add("down");
     fired = false;
@@ -148,26 +167,24 @@ document.querySelectorAll(".hb").forEach(b => {
   b.addEventListener("pointerup", end(false));
   b.addEventListener("pointercancel", end(true));
   b.addEventListener("contextmenu", e => e.preventDefault());
-  b.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); } });
-  b.addEventListener("click", e => { if (e.detail === 0) send({t: "short", btn: n}); });   // keyboard activation
+  b.addEventListener("click", e => e.preventDefault());
+  b.addEventListener("keydown", e => {            // keyboard focus on a button: Enter/Space press it
+    if ((e.key === "Enter" || e.key === " ") && !e.repeat) {
+      send({t: e.shiftKey ? "long" : "short", btn: n});
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  });
 });
 document.addEventListener("keydown", e => {
   const n = {ArrowUp: 0, Enter: 1, " ": 1, ArrowDown: 2}[e.key];
-  if (n === undefined || e.repeat || e.target.closest(".hb")) return;
+  if (n === undefined || e.repeat) return;
   send({t: e.shiftKey ? "long" : "short", btn: n});
   e.preventDefault();
 });
 
-// ---- status and the button lights
-function ledCss(rgb) {
-  const mx = Math.max(...rgb);
-  if (mx < 4) return {bg: "#1d252c", glow: "none", border: "#3a4652"};
-  const k = 255 / mx * (0.4 + 0.6 * mx / 255);           // keep the hue, show dim LEDs as dim but visible
-  const c = rgb.map(v => Math.min(255, Math.round(v * k)));
-  const css = `rgb(${c.join(",")})`;
-  return {bg: css, glow: `0 0 ${Math.round(6 + 18 * mx / 255)}px rgba(${c.join(",")},${(0.35 + 0.5 * mx / 255).toFixed(2)})`,
-          border: css};
-}
+// ---- status line, every 2 s, one request at a time
+let polling = false, lastState = 0;
 function chip(text, cls) {
   const s = document.createElement("span");
   s.className = "chip" + (cls ? " " + cls : "");
@@ -175,26 +192,30 @@ function chip(text, cls) {
   return s;
 }
 async function poll() {
+  if (polling || document.hidden) return;
+  polling = true;
   try {
-    const r = await fetch("/api/mirror/state", {cache: "no-store"});
-    if (r.status === 401) { location.href = "/login?next=/mirror"; return; }
+    const r = await req("/api/mirror/state", {}, 4000);
+    const prev = S.rail_side;
     S = await r.json();
     lastState = Date.now();
     $("stage").classList.toggle("left", S.rail_side === "left");
-    document.querySelectorAll(".hb").forEach((b, i) => {
-      const l = ledCss(S.leds[i] || [0, 0, 0]);
-      b.style.background = l.bg; b.style.boxShadow = l.glow; b.style.borderColor = l.border;
-    });
+    if (prev !== S.rail_side) layout();
     const ch = $("chips");
     ch.replaceChildren(chip(S.page || "—"), chip(S.screen_on ? "rack screen on" : "rack screen asleep"));
     if (S.door) ch.append(chip("door " + S.door));
     if (S.maint) ch.append(chip("maintenance", "maint"));
-  } catch (e) { /* shown by the live dot going grey */ }
-  if (streaming && $("img").naturalWidth) $("msg").hidden = true;   // not every browser fires load for a stream
-  const ok = Date.now() - lastState < 3000;
-  $("live").classList.toggle("on", ok);
-  $("livetext").textContent = ok ? "live" : "offline";
+  } catch (e) { /* shown below */ }
+  polling = false;
+  showHealth();
 }
+function showHealth() {
+  const ok = Date.now() - lastFrame < 6000 && Date.now() - lastState < 8000;
+  $("live").classList.toggle("on", ok);
+  $("livetext").textContent = ok ? "live" : "reconnecting…";
+  if (!ok && lastFrame) { $("msg").hidden = false; $("msg").textContent = "Lost the connection, reconnecting…"; }
+}
+
 // ---- size the screen to the window, keeping the rack screen's 5:3 shape
 function layout() {
   const col = innerWidth < 600 ? 58 : 84, gap = 12;
@@ -211,9 +232,10 @@ function layout() {
 }
 addEventListener("resize", layout);
 layout();
-setInterval(() => { if (!document.hidden) poll(); }, 250);
+setInterval(poll, 2000);
+setInterval(showHealth, 1000);
 poll();
-startStream();
+frames();
 </script>
 </body>
 </html>

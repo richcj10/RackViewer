@@ -1039,7 +1039,7 @@ class Engine:
         ref = templ(p.get("entity"), item)
         v, s = self.val_text(p, item)
         self.ui.kv(r.x, r.y, r.w, self.text(p.get("label"), item) or (ref or ""), s, size=14)
-        hist = self.ui.history(ref, int(p.get("minutes") or 60))
+        hist = self.ui.recent(ref, int(p.get("minutes") or 60))
         g = self.ui.pg.Rect(r.x, r.y + 24, r.w, r.h - 26)
         self.ui.pg.draw.rect(self.ui.canvas, rv.BG, g, border_radius=6)
         if len(hist) > 1:

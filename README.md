@@ -52,7 +52,7 @@ muted text accent …`), `#rrggbb`, a ref to a colour name (`@color`), a value m
   new devices, notes.
 - **Live view**: `http://<pi>:8088/mirror` (or *Live view* in the builder) shows the rack screen live in any browser,
   e.g. a tablet elsewhere in the house. Tap it like the touchscreen; the three round buttons are the rack's
-  buttons (hold for a long press) and glow like the real ones. It uses the builder login and works while the
+  buttons (hold for a long press). It uses the builder login and works while the
   rack's own screen sleeps, without waking it. The screen is only drawn and streamed while someone watches.
 - **New-device alerts**: a device that joins the network for the first time raises a warning until it is marked
   known (on the Timeline screen or in the builder). With UniFi Port Map add-on 1.1 every UniFi client counts,

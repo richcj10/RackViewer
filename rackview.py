@@ -2212,7 +2212,7 @@ class UI:
             if not dq or now - dq[-1][0] >= 4.5:
                 dq.append((now, v))
 
-    def history(self, ref, minutes):
+    def recent(self, ref, minutes):          # short in-memory history for sparklines (self.history is the database)
         cut = time.time() - minutes * 60
         return [v for t_, v in self.hist.get(ref, ()) if t_ >= cut]
 
