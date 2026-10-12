@@ -34,6 +34,7 @@ import socket
 import struct
 from collections import deque
 import io
+import zlib
 import queue as _queue
 import secrets
 
@@ -122,6 +123,7 @@ CONF_DIR = os.path.dirname(os.path.abspath(CONFIG_FILE))
 OUTAGE_SUGGEST_MIN = cfg("outage_suggest_minutes", 15)     # runtime below which the outage screen says "shut down now"
 OUTAGE_ORDER = cfg("outage_order", [])                     # iDRAC server ids, shut down first to last
 MAINT_COLOR = (150, 90, 255)
+MIRROR_FPS = 6                      # live view (webui /mirror): most frames a second sent to browsers
 HA_SYS = ("disk_free", "disk_use", "load_1m", "memory_use_percent", "processor_use", "processor_temperature")
 GPS_HEALTH = {0: "Receiver down", 1: "Unknown mode", 2: "Acquiring signal", 3: "Bad geometry",
               4: "Propagate mode", 5: "2D solution", 6: "3D solution", 7: "Position hold", 8: "Time valid"}
@@ -1252,6 +1254,9 @@ class UI:
         self.cdetail = None        # (detail id, item) while a detail screen is open
         self.hist = {}             # ref -> deque[(t, value)] for history graphs
         self.web_q = _queue.Queue()
+        self.remote_q = _queue.Queue()  # touches from the live view: ("down" | "move" | "up", x, y)
+        self.mirror = dict(seen=0.0, at=0.0, crc=None, frame=None, seq=0)   # latest JPEG of the screen
+        self.mirror_cv = threading.Condition()
         self.draft = None          # (screen dict, time) being edited in the builder
         self.outage = None         # {"since": epoch} while the UPS runs on battery
         self.maint = None          # {"since": epoch, "source": "door" | "manual"} during maintenance
@@ -1417,9 +1422,9 @@ class UI:
             print("screen:", e, flush=True)
 
     # -- input
-    def press(self, kind, btn):
+    def press(self, kind, btn, remote=False):
         self.last_input = time.monotonic()
-        if not self.screen_on:
+        if not self.screen_on and not remote:
             self._set_screen(True)
             return
         if self.help:
@@ -2788,6 +2793,59 @@ class UI:
                                      self.start_ups_test),
                     enabled=ups["present"] and not test)
 
+    # -- touch input (the touchscreen, and the live view in a browser with remote=True)
+    def touch_down(self, x, y, remote=False):
+        self.last_input = time.monotonic()
+        if not self.screen_on and not remote:    # first touch only wakes the screen; the live view works asleep
+            self._set_screen(True)
+            return
+        on_rail = x >= W - RAIL_W if RAIL_SIDE == "right" else x < RAIL_W
+        if on_rail:
+            self.press("short", min(2, y * 3 // H), remote)
+            return
+        cx = x - (0 if RAIL_SIDE == "right" else RAIL_W)
+        if not (self.dialog or self.help):
+            hit_drag = next((fn for rect, fn in reversed(self.drags) if rect.collidepoint(cx, y)), None)
+            if hit_drag:
+                self.active_drag = (hit_drag, x - cx)
+                hit_drag(cx, y, "down")
+                return
+        for rect, fn in reversed(self.hits):   # topmost (last drawn) first
+            if rect.collidepoint(cx, y):
+                fn()
+                break
+
+    def touch_move(self, x, y):
+        if self.active_drag:
+            self.last_input = time.monotonic()
+            fn, dx = self.active_drag
+            fn(x - dx, y, "move")
+
+    def touch_up(self, x, y):
+        self.hold_start = None
+        if self.active_drag:
+            fn, dx = self.active_drag
+            self.active_drag = None
+            fn(x - dx, y, "up")
+
+    # -- live view: the browser page streams these JPEGs while someone watches
+    def mirror_active(self, now=None):
+        return (now or time.monotonic()) - self.mirror["seen"] < 4
+
+    def mirror_capture(self, now):
+        mi = self.mirror
+        if now - mi["at"] < 1 / MIRROR_FPS:
+            return
+        mi["at"] = now
+        crc = zlib.crc32(self.pg.image.tostring(self.screen, "RGB"))
+        if crc == mi["crc"]:                     # unchanged screen: nothing to send
+            return
+        buf = io.BytesIO()
+        self.pg.image.save(self.screen, buf, "frame.jpg")
+        with self.mirror_cv:
+            mi.update(crc=crc, frame=buf.getvalue(), seq=mi["seq"] + 1)
+            self.mirror_cv.notify_all()
+
     # -- main loop
     def run(self):
         pg = self.pg
@@ -2804,39 +2862,22 @@ class UI:
                     if ev.key in keymap:
                         self.press("long" if ev.mod & pg.KMOD_SHIFT else "short", keymap[ev.key])
                 elif ev.type == pg.MOUSEBUTTONUP:
-                    self.hold_start = None
-                    if self.active_drag:
-                        fn, dx = self.active_drag
-                        self.active_drag = None
-                        fn(ev.pos[0] - dx, ev.pos[1], "up")
-                elif ev.type == pg.MOUSEMOTION and self.active_drag:
-                    self.last_input = time.monotonic()
-                    fn, dx = self.active_drag
-                    fn(ev.pos[0] - dx, ev.pos[1], "move")
+                    self.touch_up(*ev.pos)
+                elif ev.type == pg.MOUSEMOTION:
+                    self.touch_move(*ev.pos)
                 elif ev.type == pg.MOUSEBUTTONDOWN:
-                    x, y = ev.pos
-                    self.last_input = time.monotonic()
-                    if not self.screen_on:
-                        self._set_screen(True)
-                        continue
-                    on_rail = x >= W - RAIL_W if RAIL_SIDE == "right" else x < RAIL_W
-                    if on_rail:
-                        self.press("short", min(2, y * 3 // H))
-                        continue
-                    cx = x - (0 if RAIL_SIDE == "right" else RAIL_W)
-                    if not (self.dialog or self.help):
-                        hit_drag = next((fn for rect, fn in reversed(self.drags) if rect.collidepoint(cx, y)), None)
-                        if hit_drag:
-                            self.active_drag = (hit_drag, x - cx)
-                            hit_drag(cx, y, "down")
-                            continue
-                    for rect, fn in reversed(self.hits):   # topmost (last drawn) first
-                        if rect.collidepoint(cx, y):
-                            fn()
-                            break
+                    self.touch_down(*ev.pos)
+            while not self.remote_q.empty():
+                kind, x, y = self.remote_q.get()
+                if kind == "down":
+                    self.touch_down(x, y, remote=True)
+                elif kind == "move":
+                    self.touch_move(x, y)
+                else:
+                    self.touch_up(x, y)
             while not self.events.empty():
-                kind, btn = self.events.get()
-                self.press(kind, btn)
+                kind, btn, *remote = self.events.get()
+                self.press(kind, btn, bool(remote))
 
             now = time.monotonic()
             if now - last_model >= 1.0:
@@ -2879,8 +2920,10 @@ class UI:
                 elif now > self.dialog["until"]:
                     self.dialog = None
             self.update_leds()
-            if self.screen_on:
+            if self.screen_on or self.mirror_active(now):
                 self.draw()
+                if self.mirror_active(now):
+                    self.mirror_capture(now)
             clock.tick(25 if self.dialog or self.hold_start or self.active_drag or self.hunt_active() else 10)
 
 

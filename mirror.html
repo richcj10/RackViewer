@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0f13">
+<title>RackView Live</title>
+<style>
+:root{--bg:#0b0f13;--panel:#151b21;--fg:#e3e9ef;--muted:#8d9aa7;--line:#26313b;--accent:#3cc6cf;--col:84px;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:14px system-ui,-apple-system,"Segoe UI",sans-serif}
+body{display:flex;flex-direction:column;min-height:100vh;padding:max(10px,env(safe-area-inset-top)) 16px 16px}
+header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-height:34px;margin-bottom:10px}
+h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.live i{width:8px;height:8px;border-radius:50%;background:#555}
+.live.on i{background:#3fb950;box-shadow:0 0 6px #3fb950}
+.chips{display:flex;gap:6px;flex-wrap:wrap;min-width:0;flex:1 1 200px}
+.chip{font-size:12px;padding:3px 9px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
+.chip.maint{background:#2d1f4d;border-color:#6b4fd0;color:#cbb8ff}
+.spacer{flex:1}
+a.link{color:var(--accent);text-decoration:none;font-size:13px}
+main{flex:1;display:flex;align-items:center;justify-content:center;min-height:0}
+.stage{display:flex;gap:12px;align-items:stretch}
+.stage.left{flex-direction:row-reverse}
+.screen{position:relative;flex:none;width:480px;height:288px;
+  border-radius:10px;overflow:hidden;background:#000;border:1px solid var(--line);
+  box-shadow:0 8px 30px rgba(0,0,0,.5);touch-action:none;user-select:none;-webkit-user-select:none;cursor:pointer}
+.screen img{display:block;width:100%;height:100%;max-width:100%;-webkit-user-drag:none;pointer-events:none}
+.screen .msg{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:15px;
+  background:rgba(0,0,0,.6);text-align:center;padding:16px}
+.screen .msg[hidden]{display:none}
+.btns{flex:none;width:var(--col);height:288px;display:flex;flex-direction:column;justify-content:space-around;align-items:center;
+  background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.hb{width:44px;height:44px;border-radius:50%;border:2px solid #3a4652;background:#1d252c;
+  cursor:pointer;touch-action:none;transition:transform .08s;-webkit-tap-highlight-color:transparent;padding:0}
+.hb:active,.hb.down{transform:scale(.92)}
+.hb:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.hint{text-align:center;color:var(--muted);font-size:12px;margin-top:10px;line-height:1.5}
+kbd{font:11px ui-monospace,monospace;border:1px solid var(--line);border-radius:4px;padding:0 4px}
+@media (max-width:600px){.hint .keys{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>RackView</h1>
+  <span class="live" id="live"><i></i><span id="livetext">connecting…</span></span>
+  <span class="chips" id="chips"></span>
+  <span class="spacer"></span>
+  <a class="link" href="/">Builder</a>
+</header>
+<main>
+  <div class="stage" id="stage">
+    <div class="screen" id="screen" aria-label="Rack screen, tap to use it">
+      <img id="img" alt="">
+      <div class="msg" id="msg">Connecting to the rack…</div>
+    </div>
+    <div class="btns" aria-label="Rack buttons">
+      <button class="hb" data-b="0" aria-label="Top button: previous screen; hold for Overview"></button>
+      <button class="hb" data-b="1" aria-label="Middle button: the screen's action; hold to put the screen to sleep"></button>
+      <button class="hb" data-b="2" aria-label="Bottom button: next screen; hold for Help"></button>
+    </div>
+  </div>
+</main>
+<div class="hint" id="hint">Tap the screen like the touchscreen. The round buttons are the rack's buttons: press, or hold for the long press.
+  <span class="keys">Keys: <kbd>↑</kbd> <kbd>Enter</kbd> <kbd>↓</kbd>, with <kbd>Shift</kbd> for a long press.</span></div>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let S = {w: 800, h: 480, long_press: 0.9, rail_side: "right"};
+let streaming = false, lastState = 0;
+
+// ---- input: sent in order, one request at a time
+let chain = Promise.resolve();
+function send(body) {
+  chain = chain.then(() => fetch("/api/mirror/input", {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(body)}).then(r => { if (r.status === 401) location.href = "/login?next=/mirror"; })
+  ).catch(() => {});
+}
+
+// ---- the picture
+function startStream() {
+  if (streaming) return;
+  streaming = true;
+  $("img").src = "/api/mirror/stream?t=" + Date.now();
+}
+function stopStream() {
+  streaming = false;
+  $("img").removeAttribute("src");
+}
+$("img").addEventListener("load", () => { $("msg").hidden = true; });
+$("img").addEventListener("error", () => {
+  if (!streaming) return;
+  streaming = false;
+  $("msg").hidden = false;
+  $("msg").textContent = "Lost the connection, retrying…";
+  setTimeout(() => { if (!document.hidden) startStream(); }, 2000);
+});
+document.addEventListener("visibilitychange", () => document.hidden ? stopStream() : startStream());
+
+// ---- touches on the picture
+const scr = $("screen");
+let touching = false, lastMove = 0;
+function pos(e) {
+  const r = scr.getBoundingClientRect();
+  return {x: Math.round((e.clientX - r.left) / r.width * S.w), y: Math.round((e.clientY - r.top) / r.height * S.h)};
+}
+scr.addEventListener("pointerdown", e => {
+  if (e.button > 0) return;
+  touching = true;
+  scr.setPointerCapture(e.pointerId);
+  send({t: "down", ...pos(e)});
+  e.preventDefault();
+});
+scr.addEventListener("pointermove", e => {
+  if (!touching || performance.now() - lastMove < 50) return;
+  lastMove = performance.now();
+  send({t: "move", ...pos(e)});
+});
+function lift(e) {
+  if (!touching) return;
+  touching = false;
+  send({t: "up", ...pos(e)});
+}
+scr.addEventListener("pointerup", lift);
+scr.addEventListener("pointercancel", lift);
+scr.addEventListener("contextmenu", e => e.preventDefault());
+
+// ---- the three hardware buttons: short press, or long press after the rack's long-press time
+document.querySelectorAll(".hb").forEach(b => {
+  const n = +b.dataset.b;
+  let timer = null, fired = false;
+  b.addEventListener("pointerdown", e => {
+    b.setPointerCapture(e.pointerId);
+    b.classList.add("down");
+    fired = false;
+    timer = setTimeout(() => { fired = true; send({t: "long", btn: n}); if (navigator.vibrate) navigator.vibrate(30); },
+                       S.long_press * 1000);
+    e.preventDefault();
+  });
+  const end = cancel => () => {
+    if (timer === null) return;
+    clearTimeout(timer);
+    timer = null;
+    b.classList.remove("down");
+    if (!fired && !cancel) send({t: "short", btn: n});
+  };
+  b.addEventListener("pointerup", end(false));
+  b.addEventListener("pointercancel", end(true));
+  b.addEventListener("contextmenu", e => e.preventDefault());
+  b.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); } });
+  b.addEventListener("click", e => { if (e.detail === 0) send({t: "short", btn: n}); });   // keyboard activation
+});
+document.addEventListener("keydown", e => {
+  const n = {ArrowUp: 0, Enter: 1, " ": 1, ArrowDown: 2}[e.key];
+  if (n === undefined || e.repeat || e.target.closest(".hb")) return;
+  send({t: e.shiftKey ? "long" : "short", btn: n});
+  e.preventDefault();
+});
+
+// ---- status and the button lights
+function ledCss(rgb) {
+  const mx = Math.max(...rgb);
+  if (mx < 4) return {bg: "#1d252c", glow: "none", border: "#3a4652"};
+  const k = 255 / mx * (0.4 + 0.6 * mx / 255);           // keep the hue, show dim LEDs as dim but visible
+  const c = rgb.map(v => Math.min(255, Math.round(v * k)));
+  const css = `rgb(${c.join(",")})`;
+  return {bg: css, glow: `0 0 ${Math.round(6 + 18 * mx / 255)}px rgba(${c.join(",")},${(0.35 + 0.5 * mx / 255).toFixed(2)})`,
+          border: css};
+}
+function chip(text, cls) {
+  const s = document.createElement("span");
+  s.className = "chip" + (cls ? " " + cls : "");
+  s.textContent = text;
+  return s;
+}
+async function poll() {
+  try {
+    const r = await fetch("/api/mirror/state", {cache: "no-store"});
+    if (r.status === 401) { location.href = "/login?next=/mirror"; return; }
+    S = await r.json();
+    lastState = Date.now();
+    $("stage").classList.toggle("left", S.rail_side === "left");
+    document.querySelectorAll(".hb").forEach((b, i) => {
+      const l = ledCss(S.leds[i] || [0, 0, 0]);
+      b.style.background = l.bg; b.style.boxShadow = l.glow; b.style.borderColor = l.border;
+    });
+    const ch = $("chips");
+    ch.replaceChildren(chip(S.page || "—"), chip(S.screen_on ? "rack screen on" : "rack screen asleep"));
+    if (S.door) ch.append(chip("door " + S.door));
+    if (S.maint) ch.append(chip("maintenance", "maint"));
+  } catch (e) { /* shown by the live dot going grey */ }
+  if (streaming && $("img").naturalWidth) $("msg").hidden = true;   // not every browser fires load for a stream
+  const ok = Date.now() - lastState < 3000;
+  $("live").classList.toggle("on", ok);
+  $("livetext").textContent = ok ? "live" : "offline";
+}
+// ---- size the screen to the window, keeping the rack screen's 5:3 shape
+function layout() {
+  const col = innerWidth < 600 ? 58 : 84, gap = 12;
+  document.documentElement.style.setProperty("--col", col + "px");
+  const availW = document.documentElement.clientWidth - 32 - col - gap;
+  const availH = innerHeight - $("hint").offsetHeight - document.querySelector("header").offsetHeight - 50;
+  const w = Math.max(200, Math.min(availW, availH * S.w / S.h, 1400));
+  const h = Math.round(w * S.h / S.w);
+  scr.style.width = Math.round(w) + "px";
+  scr.style.height = h + "px";
+  document.querySelector(".btns").style.height = h + "px";
+  const d = Math.max(28, Math.min(col - 16, h / 3 - 16));
+  document.querySelectorAll(".hb").forEach(b => { b.style.width = b.style.height = d + "px"; });
+}
+addEventListener("resize", layout);
+layout();
+setInterval(() => { if (!document.hidden) poll(); }, 250);
+poll();
+startStream();
+</script>
+</body>
+</html>

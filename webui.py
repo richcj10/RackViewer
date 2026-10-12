@@ -102,7 +102,9 @@ def create_app(ui):
         if not has_password():
             return (jsonify(error="setup"), 401) if request.path.startswith("/api/") else redirect("/setup")
         if session.get("ok") != _pw_stamp():
-            return (jsonify(error="login"), 401) if request.path.startswith("/api/") else redirect("/login")
+            if request.path.startswith("/api/"):
+                return jsonify(error="login"), 401
+            return redirect("/login?next=/mirror" if request.path == "/mirror" else "/login")
         return None
 
     def _pw_stamp():
@@ -141,7 +143,7 @@ def create_app(ui):
             if check_password(request.form.get("pw", "")):
                 session["ok"] = _pw_stamp()
                 session.permanent = True
-                return redirect("/")
+                return redirect("/mirror" if request.args.get("next") == "/mirror" else "/")
             time.sleep(1)
             err = "Wrong password."
         return form_page("RackView Builder", "Enter the builder password. Forgot it? Reset it on the touchscreen: "
@@ -514,6 +516,62 @@ def create_app(ui):
     def status():
         return jsonify(pages=ui.PAGES, page=ui.PAGES[ui.page] if ui.PAGES else None, screen_on=ui.screen_on,
                        ha_ok=bool(ui.model) and ui.model.get("ha_age") is not None and ui.model["ha_age"] < 30)
+
+    # ---------------------------------------------------------------- live view
+    @app.route("/mirror")
+    def mirror_page():
+        return send_file(os.path.join(BASE, "mirror.html"))
+
+    @app.route("/api/mirror/stream")
+    def mirror_stream():
+        """MJPEG stream of the rack screen. Watching keeps the screen drawn even while the panel sleeps."""
+        def gen():
+            seq, sent_at = None, 0.0
+            while True:
+                ui.mirror["seen"] = time.monotonic()
+                with ui.mirror_cv:
+                    ui.mirror_cv.wait_for(lambda: ui.mirror["seq"] != seq, timeout=1.0)
+                    frame, new = ui.mirror["frame"], ui.mirror["seq"]
+                # resend now and then even when nothing changed, so a closed tab is noticed and the stream ends
+                if frame is None or (new == seq and time.monotonic() - sent_at < 2):
+                    continue
+                seq, sent_at = new, time.monotonic()
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " + str(len(frame)).encode()
+                       + b"\r\n\r\n" + frame + b"\r\n")
+        return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame",
+                        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+    @app.route("/api/mirror/state")
+    def mirror_state():
+        now = time.monotonic()
+        leds = []
+        for i in range(3):
+            try:
+                leds.append([int(v) for v in ui.panel._level(i, now)])
+            except Exception:
+                leds.append([0, 0, 0])
+        page = ui.PAGES[ui.page] if ui.PAGES else None
+        return jsonify(leds=leds, screen_on=ui.screen_on, page=ui.TITLES.get(page, page), door=ui.door,
+                       maint=bool(ui.maint), rail_side=rv.RAIL_SIDE, long_press=rv.LONG_PRESS,
+                       w=rv.W, h=rv.H, rail_w=rv.RAIL_W)
+
+    @app.route("/api/mirror/input", methods=["POST"])
+    def mirror_input():
+        d = request.get_json(silent=True) or {}
+        t = d.get("t")
+        if t in ("down", "move", "up"):
+            try:
+                x = min(max(int(d["x"]), 0), rv.W - 1)
+                y = min(max(int(d["y"]), 0), rv.H - 1)
+            except (KeyError, TypeError, ValueError):
+                return jsonify(error="x and y needed"), 400
+            ui.remote_q.put((t, x, y))
+        elif t in ("short", "long") and d.get("btn") in (0, 1, 2):
+            ui.events.put((t, d["btn"], "remote"))
+        else:
+            return jsonify(error="unknown input"), 400
+        ui.mirror["seen"] = time.monotonic()
+        return jsonify(ok=True)
 
     return app
 
