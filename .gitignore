@@ -8,3 +8,6 @@ rackview.log
 rackview.log.old
 __pycache__/
 *.pyc
+
+# misc
+.lgd-nfy*

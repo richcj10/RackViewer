@@ -16,6 +16,7 @@ Site settings: ~/.config/rackview/config.json (see config.example.json).
 """
 import json
 import math
+import sys
 import os
 import queue
 import re
@@ -32,6 +33,13 @@ from wled import WledLink
 import socket
 import struct
 from collections import deque
+import io
+import queue as _queue
+import secrets
+
+if __name__ == "__main__":                 # let engine.py / webui.py "import rackview" get this running module
+    sys.modules.setdefault("rackview", sys.modules["__main__"])
+import engine as eng  # noqa: E402
 
 # ----------------------------------------------------------------- config
 # Site settings live in ~/.config/rackview/config.json (see config.example.json); anything not set
@@ -73,6 +81,9 @@ UPS_PREFIX = cfg("ups_prefix", "ups")                     # NUT: sensor.<prefix>
 PDU_PREFIX = cfg("pdu_prefix", "usp_pdu_pro")             # UniFi PDU: sensor.<prefix>_outlet_N_outlet_power
 FIREWALL_PREFIX = cfg("firewall_prefix", "opnsense")      # OPNsense: sensor.<prefix>_interface_wan_status, ...
 INTERNET_ENTITY = cfg("internet_entity", "")              # optional binary_sensor that is on when internet is up
+SCREENS_FILE = os.path.expanduser(cfg("screens_file", "~/.config/rackview/screens.json"))
+FACTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "layouts", "default_screens.json")
+WEB_PORT = cfg("web_port", 8088)
 ENTITY_RE = (r"^(sensor|binary_sensor|switch)\.(idrac_|fancontrol|lab_fancontrol|usw_pro_max_|"
              + "|".join(re.escape(x + "_") for x in (UPS_PREFIX, PDU_PREFIX, FIREWALL_PREFIX) if x) + ")"
              + (r"|^" + re.escape(INTERNET_ENTITY) + "$" if INTERNET_ENTITY else "")
@@ -260,6 +271,12 @@ class Data:
         gw = subprocess.run(["ip", "route", "show", "default"], capture_output=True, text=True).stdout.split()
         self.gateway = gw[2] if len(gw) > 2 else "127.0.0.1"
         self.s250 = None
+        self.extra_re = ""          # entities used by custom screens (engine.entity_regex)
+        self.watch = set()          # entities whose full attributes custom screens need
+        self.user_tpls = []         # HA templates used by custom screens
+        self.tvals = {}             # template -> rendered value
+        self.rules = []             # alert rules from screens.json
+        self.alert_label = ""       # HA label whose binary sensors raise alerts
         self.wpsd = None
         self.portmap = None
         self.ha_meta = {}
@@ -268,15 +285,21 @@ class Data:
         for target in (self._ha_loop, self._uiwled_loop, self._ping_loop, self._time_loop):
             threading.Thread(target=target, daemon=True).start()
 
-    def _ha_loop(self):
-        tpl = ("{\"e\": [{% for s in states if s.entity_id is search('" + ENTITY_RE.replace("\\", "\\\\") + "') %}"
+    def _ha_tpl(self):
+        regex = ENTITY_RE + ("|" + self.extra_re if self.extra_re else "")
+        watch = json.dumps(sorted(self.watch))
+        label = json.dumps(self.alert_label or "__none__")
+        return ("{\"e\": [{% for s in states if s.entity_id is search('" + regex.replace("\\", "\\\\").replace("'", "\\'") + "') %}"
                "[{{ s.entity_id|tojson }},{{ s.state|tojson }},"
                "{{ s.attributes.unit_of_measurement|default('')|tojson }},"
-               "{% if s.domain in ['light', 'select'] %}{{ {'b': s.attributes.brightness|default(none), "
+               "{% if s.entity_id in " + watch + " %}{{ dict(s.attributes, b=s.attributes.brightness|default(none), "
+               "pct=s.attributes.percentage|default(none), friendly_name=s.name) | tojson }}"
+               "{% elif s.domain in ['light', 'select', 'fan'] %}{{ {'b': s.attributes.brightness|default(none), "
+               "'pct': s.attributes.percentage|default(none), "
                "'rgb': s.attributes.rgb_color|default(none), 'fx': s.attributes.effect|default(none), "
                "'opts': s.attributes.options|default(none)}|tojson }}"
                "{% elif s.entity_id == 'sensor." + UPS_PREFIX + "_self_test_result' %}"
-               "{{ {'lc': as_timestamp(s.last_changed)}|tojson }}{% else %}null{% endif %}]"
+               "{{ {'lc': as_timestamp(s.last_changed)}|tojson }}{% else %}null{% endif %},{{ s.name|tojson }}]"
                "{{ ',' if not loop.last }}{% endfor %}], "
                "\"s250\": {% set ns = namespace(e=none) %}"
                "{% for e in integration_entities('mqtt') | select('is_device_attr', 'model', '" + S250_MODEL + "') %}"
@@ -307,17 +330,51 @@ class Data:
                "'notifications': states.persistent_notification | list | count, "
                "'idrac': states.binary_sensor | selectattr('entity_id', 'search', '^binary_sensor\\.idrac_.+_available$') "
                "| map(attribute='state') | list"
-               "} | tojson }}}")
+               "} | tojson }}, "
+               "\"labels\": [{% for e in label_entities(" + label + ") %}"
+               "[{{ e|tojson }}, {{ state_attr(e, 'friendly_name')|default(e)|tojson }}, {{ states(e)|tojson }}]"
+               "{{ ',' if not loop.last }}{% endfor %}]}")
+
+    def _render_user_templates(self):
+        """Render the custom screens' HA templates in one call; on an error, find the bad one(s)."""
+        tpls = list(self.user_tpls)
+        if not tpls:
+            self.tvals = {}
+            return
+        body = "".join("{%% set _t%d %%}%s{%% endset %%}" % (i, t) for i, t in enumerate(tpls))
+        body += "{" + ",".join('"%d": {{ _t%d | trim | tojson }}' % (i, i) for i in range(len(tpls))) + "}"
+        try:
+            r = self.http.post(HA_URL + "/api/template", json={"template": body}, timeout=8)
+            r.raise_for_status()
+            j = r.json()
+            self.tvals = {t: j.get(str(i)) for i, t in enumerate(tpls)}
+            return
+        except Exception:
+            pass
+        out = {}
+        for t in tpls:                       # isolate failures so one typo doesn't blank every template
+            try:
+                r = self.http.post(HA_URL + "/api/template", json={"template": t}, timeout=5)
+                out[t] = r.text.strip() if r.ok else "⚠ template error"
+            except Exception:
+                out[t] = "⚠"
+        self.tvals = out
+
+    def _ha_loop(self):
         while True:
             try:
+                tpl = self._ha_tpl()
                 r = self.http.post(HA_URL + "/api/template", json={"template": tpl}, timeout=8)
                 r.raise_for_status()
                 j = r.json()
-                ents = {e: {"s": st, "u": u, "a": a or {}} for e, st, u, a in j["e"]}
+                ents = {row[0]: {"s": row[1], "u": row[2], "a": row[3] or {}, "n": row[4] if len(row) > 4 else None}
+                        for row in j["e"]}
                 with self.lock:
                     self.ents, self.s250, self.ha_ok_at, self.ha_err = ents, j.get("s250"), time.time(), ""
                     self.wpsd, self.ha_meta, self.ha_latency = j.get("wpsd"), j.get("ha") or {}, r.elapsed.total_seconds()
                     self.portmap = j.get("portmap")
+                    self.labels = j.get("labels") or []
+                self._render_user_templates()
             except Exception as e:
                 with self.lock:
                     self.ha_err = str(e)[:80]
@@ -437,8 +494,20 @@ class Data:
     def snapshot(self):
         with self.lock:
             t = dict(self.time, history=list(self.time["history"]), s250=self.s250, wpsd=self.wpsd, portmap=self.portmap,
+                     labels=list(getattr(self, "labels", [])), rules=list(self.rules), tvals=dict(self.tvals),
                      ha_meta=dict(self.ha_meta), ha_latency=self.ha_latency)
             return dict(self.ents), self.ha_ok_at, self.ha_err, list(self.switches), dict(self.pings), t
+
+
+def local_ip():
+    try:
+        sk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sk.connect(("1.1.1.1", 80))
+        ip = sk.getsockname()[0]
+        sk.close()
+        return ip
+    except OSError:
+        return "rackviewer.local"
 
 
 # ----------------------------------------------------------------- model
@@ -464,7 +533,7 @@ def build_model(data):
     def unit(e):
         return ents.get(e, {}).get("u", "").replace("Â", "")
 
-    m = {"alerts": [], "ha_age": time.time() - ha_ok_at if ha_ok_at else None, "ha_err": ha_err}
+    m = {"alerts": [], "ha_age": time.time() - ha_ok_at if ha_ok_at else None, "ha_err": ha_err, "ents": ents}
     A = m["alerts"]
 
     # --- servers (iDRAC)
@@ -637,7 +706,7 @@ def build_model(data):
             fe = f"fan.{d}_{d}_fan_{i}"
             fans.append(dict(n=i, rpm=num(rpm), pwm=num(pwm), fitted=not (rpm in BAD and pwm in BAD), alert=alert,
                              entity=fe if fe in ents else None, state=st(fe)))
-        fc = dict(name=d.replace("fancontrol", "Fan ctrl "), offline=offline, esp=nv(pre + "esp32_temp"),
+        fc = dict(id=d, name=d.replace("fancontrol", "Fan ctrl "), offline=offline, esp=nv(pre + "esp32_temp"),
                   esp_u=unit(pre + "esp32_temp"), fans=fans, sev=0)
         if offline:
             fc["sev"] = 1
@@ -809,6 +878,27 @@ def build_model(data):
 
     if m["ha_age"] is None or m["ha_age"] > 30:
         A.append(Alert(1, "overview", "ha-stale", "No data from Home Assistant"))
+    else:
+        # alert rules made in the builder
+        tv = tdata.get("tvals") or {}
+        for i, rule in enumerate(tdata.get("rules") or []):
+            ref = rule.get("ref") or rule.get("entity")
+            if not ref:
+                continue
+            if "{{" in ref:
+                v = tv.get(ref)
+            elif "@" in ref:
+                e_, path = ref.split("@", 1)
+                v = eng.dig((ents.get(e_.strip()) or {}).get("a") or {}, path)
+            else:
+                v = st(ref)
+            if v is not None and eng.compare(v, rule.get("op", "=="), rule.get("value", "")):
+                A.append(Alert(2 if rule.get("severity") == "crit" else 1, rule.get("page") or "overview",
+                               f"rule-{i}", rule.get("text") or ref, f"{ref} = {v}"))
+        # binary sensors carrying the alert label in HA
+        for eid, name, state in tdata.get("labels") or []:
+            if state == "on":
+                A.append(Alert(1, "overview", f"label-{eid}", name or eid))
 
     A.sort(key=lambda a: -a.sev)
     m["page_sev"] = {}
@@ -817,7 +907,282 @@ def build_model(data):
     m["overall"] = max((a.sev for a in A), default=0)
     m["page_sev"]["overview"] = m["overall"]
     m["stale"] = m["ha_age"] is None or m["ha_age"] > 30
+    view_fields(m, data)
     return m
+
+
+SEV_NAME = {0: "ok", 1: "warn", 2: "crit"}
+
+
+def _f(v, unit):
+    """Temperature in °F (for thresholds) from a value in °F or °C."""
+    return None if v is None else (v if "F" in (unit or "") else v * 9 / 5 + 32)
+
+
+def _temp_color(v, unit, warn_f):
+    f = _f(v, unit)
+    return "muted" if f is None else "crit" if f >= 185 else "warn" if f >= warn_f else "ok"
+
+
+def view_fields(m, data):
+    """Fields the screen layouts display: status colour names, ready-made rows and short texts.
+
+    Layouts (screens.json) decide where and how things are drawn; this adds the derived values they read,
+    e.g. $servers.0.color = "ok" / "warn" / "crit" / "dim".
+    """
+    sevc = lambda sev, other: SEV_NAME[sev] if sev else other
+
+    # --- servers
+    for s in m["servers"]:
+        on, health, reason = s["on"], s["health"], s.get("reason")
+        s["color"] = sevc(s["sev"], "ok" if on else "dim")
+        s["health_color"] = sevc(s["sev"], "text")
+        s["state_line"] = ("ON" if on else "OFF") + (f" · {health}" if health not in BAD else "")
+        temps = s["temps"]
+        s["temps"] = [dict(name=label, value=v, unit=u, f=_f(v, u), color=_temp_color(v, u, 158)) for label, v, u in temps]
+        hot = s["temps"][0] if s["temps"] else None
+        s["hot_text"] = f" · {hot['value']:.0f}{hot['unit']} {hot['name']}" if hot and on else ""
+        s["fans"] = [dict(n=n, rpm=rpm, name=f"Fan {n}") for n, rpm in s["fans"]]
+        s["temps_max"] = 8 if s["fans"] else 14
+        s["no_temps"] = "No readings" + ("" if on else " (server off)")
+        s["can"] = {key: True for key, _label, _ent in s["actions"]}
+        s["essential"] = s["id"] in ESSENTIAL_SERVERS
+        s["confirm"] = "hold" if s["essential"] else "confirm"
+        s["soft_ess"] = bool(s["can"].get("soft")) and s["essential"]
+        s["soft_norm"] = bool(s["can"].get("soft")) and not s["essential"]
+        s["why"] = bool(s["sev"] and on and health not in BAD and health.lower() != "ok")
+        s["reason_text"] = reason if reason not in BAD else "Cause not reported. Update the iDRAC MQTT Poller add-on to 1.0.3."
+        s["reason_color"] = s["health_color"] if reason not in BAD else "dim"
+        s["has_error"] = s["last_error"] not in BAD
+
+    # --- power
+    ups, pdu = m["ups"], m["pdu"]
+    ups["color"] = sevc(ups["sev"], "ok")
+    ups["load_color"] = "warn" if (ups["load"] or 0) > 80 else "info"
+    pdu["color"] = sevc(pdu["sev"], "text")
+    pdu["top"] = max([(w or 0) for _, w, _ in pdu["outlets"]] or [0]) or 1
+    pdu["outlets"] = [dict(n=o, watts=w, state=sw, off=sw == "off",
+                           text="off" if sw == "off" else fmt(w, " W", 0 if (w or 0) >= 10 else 1),
+                           color="dim" if sw == "off" or not w else "text", num_color="dim" if sw == "off" else "muted",
+                           bar_color="dim" if sw == "off" else "info") for o, w, sw in pdu["outlets"]]
+
+    # --- network
+    fw = m["fw"]
+
+    def updown(name, v, good):
+        return dict(name=name, value=v or "—", color="ok" if v == good else "crit" if v not in BAD else "muted")
+    fw["links"] = [updown("WAN gateway", fw["wan_gw"], "online"), updown("Backup WAN", fw["bwan_gw"], "online"),
+                   updown("LTE (WWAN)", fw["wwan"], "up"), updown("OpenVPN", fw["vpn"], "up")]
+    m["inet"] = next((p for p in m["pings"] if p["label"] == "Internet"), {})
+    for p in m["pings"]:
+        p["color"] = sevc(p["sev"], "ok" if p["ms"] is not None else "muted")
+        p["vcolor"] = p["color"] if p["sev"] else "text"
+        p["none_text"] = "no reply" if p["fails"] else "…"
+    ether = {e.get("hostname", ""): e for e in m["etherlight"]}
+    for sw in m["switches"]:
+        sw["color"] = sevc(sw["sev"], "ok")
+        el = next((e for k, e in ether.items() if k.replace("-", "_").lower().startswith(sw["name"].replace(" ", "_").lower())), None)
+        if el:
+            on, bri = el.get("state", {}).get("On"), el.get("state", {}).get("Brightness")
+            sw["etherlight"] = f"on · {round(bri * 100 / 255)}%" if on and bri is not None else ("on" if on else "off")
+        else:
+            sw["etherlight"] = None
+
+    # --- cooling
+    rpms = [f["rpm"] for fc in m["fanctl"] for f in fc["fans"] if f["fitted"] and f["rpm"]]
+    temps = [s["temp"] for s in m["switches"] if s["temp"] is not None]
+    m["summary"] = dict(fan_avg=sum(rpms) / len(rpms) if rpms else None, switch_tmax=max(temps) if temps else None)
+    for fc in m["fanctl"]:
+        fc["color"] = sevc(fc["sev"], "ok")
+        fc["esp_text"] = "OFFLINE" if fc["offline"] else f"ESP32 {fmt(fc['esp'], fc['esp_u'])}"
+        fc["esp_color"] = "warn" if fc["offline"] else "muted"
+        top = max([f["rpm"] or 0 for f in fc["fans"]] + [3000])
+        for f in fc["fans"]:
+            on, unknown = f["state"] == "on", f["state"] in BAD
+            fit = f["fitted"] and not fc["offline"]
+            f.update(name=f"Fan {f['n']}", fit=fit, on=on, live=fit and (on or unknown), off_shown=fit and not (on or unknown),
+                     frac=(f["rpm"] or 0) / top if on or unknown else 0, frac_on=(f["rpm"] or 0) / top if on else 0,
+                     color="crit" if f["alert"] else "info" if on or unknown else "dim",
+                     label_color="text" if fit else "dim",
+                     state_text="ALARM" if f["alert"] else ("running" if on else "off"),
+                     state_color="crit" if f["alert"] else "ok" if on else "muted",
+                     nc_text="not connected" if not fc["offline"] else "offline",
+                     rpm_text=f"{fmt(f['rpm'])} rpm" if on else "—", rpm_color="text" if on else "muted",
+                     row_color="card2" if fit else "card",
+                     can_toggle=bool(f["entity"]) and fit and not unknown, toggle_on=bool(f["entity"]) and fit and on,
+                     toggle_off=bool(f["entity"]) and fit and not on and not unknown)
+        fitted = [f for f in fc["fans"] if f["fitted"]]
+        ctl = [f["entity"] for f in fitted if f["entity"] and f["state"] not in BAD]
+        fc["ctl"] = ctl
+        fc["fitted_n"] = len(fitted)
+        fc["running"] = sum(1 for f in fitted if f["state"] == "on")
+        fc["any_on"] = any(f["state"] == "on" for f in fitted)
+        fc["ctl_mode"] = "offline" if fc["offline"] else "none" if not ctl else "on" if fc["any_on"] else "off"
+        fc["ctl_text"] = "Controller offline" if fc["offline"] else "No fan control"
+    eq = [(s["name"], s["temp"], s["temp_u"]) for s in m["switches"]]
+    if fw["present"]:
+        eq.append(("Firewall CPU", fw["temp"], fw["temp_u"]))
+    if ups["present"]:
+        eq.append(("UPS", ups["temp"], "°F"))
+    for s in m["servers"]:
+        if s["on"] and s["temps"]:
+            eq.append((f"{s['name']} (hottest)", s["temps"][0]["value"], s["temps"][0]["unit"]))
+    m["equip_temps"] = [dict(name=n, value=v, unit=u, color=_temp_color(v, u, 150)) for n, v, u in eq]
+
+    # --- time
+    t = m["time"]
+    srv, sn, pi = t["server"], t["snmp"], t["pi"]
+    if t["fails"] >= 2:
+        t["state_text"], t["state_color"] = "NO REPLY", "crit"
+    elif not srv:
+        t["state_text"], t["state_color"] = "WAITING…", "muted"
+    elif t["locked"]:
+        t["state_text"], t["state_color"] = "GPS LOCKED", "ok"
+    else:
+        t["state_text"], t["state_color"] = "NOT LOCKED", "crit"
+    if sn:
+        hc = sn["health_code"]
+        used = sum(1 for x in sn["sats"] if x.get("used"))
+        up = re.match(r"(\d+)(?: days?|:)", sn.get("uptime") or "")
+        t["gps"] = dict(
+            receiver=GPS_HEALTH.get(hc, sn.get("gps_health", "?")),
+            receiver_color="ok" if hc == 8 else "warn" if hc in (4, 5, 6, 7) else "crit",
+            mode={"Hold": "Position hold", "Survey": "Surveying", "Dynamic": "Dynamic"}.get(sn["mode"], sn["mode"]),
+            timing=sn.get("timing_status") or "—",
+            timing_color="ok" if (sn.get("timing_status") or "").lower() == "good" else "warn",
+            holdover="no (GPS disciplined)" if not sn["fly"] else f"{sn['fly']} s",
+            holdover_color="text" if not sn["fly"] else "warn",
+            sats=f"{used} used / {sn['sat_count']} tracked" if sn["sat_count"] else ("not reported (locked)" if hc == 8 else "none"),
+            sats_color="text" if sn["sat_count"] else ("dim" if hc == 8 else "crit"),
+            utc=f"{sn.get('utc_offset', '?')} s (leap secs)", osc=(sn.get("freq") or "—").replace(" PPM", " ppm"),
+            fw_line=f"fw {sn.get('firmware', '?')}" + (f" · up {up.group(1)} d" if up else ""))
+    else:
+        t["gps"] = None
+    t["source_text"] = "via HA" if t["source"] == "ha" else "direct"
+    if srv:
+        t["srv"] = dict(stratum=f"{srv['stratum']} · ref {srv['refid']}",
+                        leap={0: "none", 1: "+1 s pending", 2: "−1 s pending", 3: "unsynchronised"}[srv["leap"]],
+                        leap_color="warn" if srv["leap"] else "text",
+                        precision=f"±{2.0 ** srv['precision'] * 1e6:.0f} µs · {srv['root_disp'] * 1000:.2f} ms",
+                        last_update="—" if srv["ref_age"] is None else f"{srv['ref_age']:.0f} s ago",
+                        last_update_color="warn" if srv["ref_age"] and srv["ref_age"] > 300 else "text")
+    else:
+        t["srv"] = None
+    t["direct"] = bool(srv) and not sn
+    ok_pi = pi.get("synced") and pi.get("server") == TIME_SERVER
+    t["pi_text"] = f"synced ✓ ({pi.get('client')})" if ok_pi else "NOT synced" if pi else "…"
+    t["pi_color"] = "ok" if ok_pi else "warn" if pi else "dim"
+    t["measured"] = bool(srv) and t["fails"] < 2
+    if t["measured"]:
+        off = srv["offset"] * 1000
+        t["offset_text"] = f"{off * 1000:+.0f} µs" if abs(off) < 1 else f"{off:+.3f} ms"
+        t["offset_sub"] = "offset (measured)" + (f" · chrony est. {pi['est'] * 1e6:.0f} µs, rms {pi['rms'] * 1e6:.0f} µs"
+                                                 if pi.get("est") is not None else "")
+        t["delay_text"] = f"delay {srv['delay'] * 1000:.2f} ms"
+        t["jitter_text"] = f"jitter {t['jitter'] * 1000:.3f} ms" if t["jitter"] is not None else "jitter …"
+    hist = t["history"]
+    t["history_text"] = f"offset history · last {max(1, round((hist[-1][0] - hist[0][0]) / 60))} min" if len(hist) > 1 else ""
+    t["lan_ports"] = [dict(n=i + 1, up=p == "up", text=f"{i + 1} {'up' if p == 'up' else '—'}",
+                           color="ok" if p == "up" else "dim", tcolor="ok" if p == "up" else "muted")
+                      for i, p in enumerate(t["ports"])]
+    for cl in t["clients"]:
+        st, rr = cl["state"], cl["r"]
+        cl["color"] = {"gps": "ok", "other": "warn", "unreachable": "dim", "pending": "dim"}[st]
+        cl["text"] = {"gps": f"stratum {rr['stratum']} ✓" if rr else "", "other": f"via {rr['refid']}" if rr else "",
+                      "unreachable": "no NTP reply", "pending": "…"}[st]
+        cl["tcolor"] = "muted" if st == "gps" else cl["color"]
+
+    # --- Home Assistant
+    ha = m["ha"]
+    hm, sy, su = ha["meta"], ha["sys"], ha["sys_u"]
+    running = m["ha_age"] is not None and m["ha_age"] < 30
+    upd_core = hm.get("core_latest") and hm.get("core_latest") != hm.get("core")
+    df, du = sy["disk_free"], sy["disk_use"]
+    dpct = 100 * du / (df + du) if df is not None and du else None
+    try:
+        import datetime as _dt
+        nxt = _dt.datetime.fromisoformat(ha["backup_next"]).astimezone().strftime("%a %H:%M")
+    except (TypeError, ValueError):
+        nxt = "—"
+    ah = ha["backup_age_h"]
+    ups_list = hm.get("updates") or []
+    un, nt, z = hm.get("unavailable"), hm.get("notifications"), ha["z2m"]
+    ha["view"] = dict(
+        state="RUNNING" if running else "UNREACHABLE", color="ok" if running else "crit",
+        latency=f"{ha['latency'] * 1000:.0f} ms" if ha["latency"] else "",
+        core=(hm.get("core") or "—") + (f" → {hm['core_latest']}" if upd_core else ""), core_color="warn" if upd_core else "text",
+        supervisor=hm.get("supervisor") or "—", os=hm.get("os") or "—", entities=f"{hm.get('total', '—')}",
+        unavailable=f"{un}" if un is not None else "—", unavailable_color="warn" if un else "text",
+        notifications=f"{nt}" if nt is not None else "—", notifications_color="warn" if nt else "text",
+        z2m={"on": "connected", "off": "DISCONNECTED"}.get(z, "—"), z2m_color="ok" if z == "on" else "warn" if z == "off" else "dim",
+        cpu=sy["processor_use"], cpu_text=f"{fmt(sy['processor_use'], '%')} · load {fmt(sy['load_1m'], '', 2)}",
+        cpu_color="warn" if (sy["processor_use"] or 0) > 80 else "info",
+        mem=sy["memory_use_percent"], mem_text=fmt(sy["memory_use_percent"], "%"),
+        mem_color="warn" if (sy["memory_use_percent"] or 0) > 90 else "info",
+        disk=dpct, disk_text=f"{fmt(du, ' GiB', 1)} used · {fmt(df, ' GiB', 1)} free", disk_color="warn" if (dpct or 0) > 90 else "info",
+        cpu_temp=fmt(sy["processor_temperature"], (su["processor_temperature"] or "").replace("Â", "") or "°", 1),
+        backup_last="—" if ah is None else (f"{ah:.0f} h ago" if ah < 48 else f"{ah / 24:.0f} days ago"),
+        backup_color="ok" if ah is not None and ah < 26 else "warn" if ah is not None else "dim", backup_next=nxt,
+        updates=[dict(name=u.replace(" Update", "").replace(" Firmware", "")) for u in ups_list],
+        updates_title=f"{len(ups_list)} update{'s' if len(ups_list) > 1 else ''} available" if ups_list else "",
+        updates_more=f"+{len(ups_list) - 3} more" if len(ups_list) > 3 else "",
+        all_ok=f"All {hm.get('update_count', '')} components up to date",
+        addons=[dict(name=label, color="ok" if ok else "dim" if ok is None else "warn",
+                     text="ok" if ok else "—" if ok is None else "no data") for label, ok in ha["addons"]])
+
+    # --- hotspot
+    hs = m["hotspot"]
+    a = hs["a"]
+    lv = a.get("live") or {}
+    on_air = a.get("on_air") == "on"
+    tgt = (lv.get("target") or a.get("last_target") or "").replace("BM: ", "")
+    m_tg = re.match(r"(TG\s*\d+)\s*(.*)", tgt)
+    dur = lv.get("duration") or ""
+    hot = PAGE_COLORS.get("hotspot", ((255, 150, 60), None))[0]
+    hot = "#%02x%02x%02x" % tuple(hot)
+    rows = [(x, "static") for x in a.get("tg_static") or []] + [(x, "dynamic") for x in a.get("tg_dynamic") or []] \
+        + [(x, "timed") for x in a.get("tg_timed") or []]
+    tgs = []
+    for x, kind in rows:
+        left = int(x["expires_in"]) if "expires_in" in x else None
+        tgs.append(dict(tg=x.get("tg"), name=x.get("name") or "", kind=kind,
+                        label=kind + (f" · TS{x['slot']}" if x.get("slot") else ""),
+                        color={"static": "ok", "dynamic": hot, "timed": "info"}[kind],
+                        expires=left is not None, left=left, left_text=f"{left // 60}:{left % 60:02d} left" if left is not None else ""))
+    heard = []
+    for row in a.get("last_heard") or []:
+        tx = (row.get("dur") or "").upper() == "TX"
+        tm = (row.get("time") or "").split(" ")
+        src = row.get("src") or ""
+        heard.append(dict(call=row.get("callsign") or "?", src=src, src_color="ok" if src == "RF" else "dim", rf=src == "RF",
+                          tx=tx, color="orange" if tx else "text", time=" ".join(tm[:2]) if len(tm) >= 2 else "",
+                          tg=(row.get("target") or "").replace("BM: ", ""),
+                          dur="TX" if tx else (f"{row.get('dur')}s" if row.get("dur") else ""),
+                          dur_color="orange" if tx else "muted"))
+    auto = a.get("tg_autostatic")
+    blocked = a.get("tg_blocked") or []
+    hs["view"] = dict(
+        on_air=on_air, call=lv.get("call") or a.get("last_call") or "—", name=lv.get("name") or "",
+        location=lv.get("location") or "", tag="ON AIR" if on_air else ("LAST CALLER" if lv.get("call") else ""),
+        tag_bg="orange" if on_air else "#9e5b21", tag_color="bg" if on_air else "text",
+        tg=m_tg.group(1) if m_tg else (tgt or "—"), tg_name=m_tg.group(2) if m_tg else "",
+        meta=" · ".join(x for x in (lv.get("mode"), lv.get("source"), dur.split(" (")[0],
+                                     f"loss {lv['loss']}" if lv.get("loss") else None) if x),
+        net="linked" if a.get("dmr_net") == "on" else "DOWN", net_color="ok" if a.get("dmr_net") == "on" else "warn",
+        tgs=tgs, tg_empty="No talkgroups linked" if "tg_static" in a else "Waiting for BrandMeister…",
+        autostatic=f"TG {auto}" if auto else "none",
+        master=a.get("dmr_master") or (f"BM {a['bm_master']}" if a.get("bm_master") else "—"),
+        blocked=", ".join(map(str, blocked)),
+        footer=f"{(str(round(a['freq_mhz'], 3)) + '00')[:7] + ' MHz' if a.get('freq_mhz') else '—'} · {a.get('status') or '—'} · "
+               f"{fmt(a.get('cpu_temp_c'), '°C')}",
+        heard=heard, host=a.get("host", ""))
+    if a.get("freq_mhz"):
+        hs["view"]["footer"] = f"{a['freq_mhz']:.3f} MHz · {a.get('status') or '—'} · {fmt(a.get('cpu_temp_c'), '°C')}"
+
+    # --- lights other than the rack strip
+    m["lights"]["list"] = [dict(name=label, id=lt["id"], on=lt["on"], ok=lt["state"] not in BAD, dimmable="uiwled" in lt["id"],
+                                name_color="text" if lt["state"] not in BAD else "dim")
+                           for label, lt in m["lights"]["extra"] if lt]
 
 
 # ----------------------------------------------------------------- UI
@@ -858,6 +1223,26 @@ class UI:
         self.pending = {}       # action key -> time sent (button shows "Sent")
         self.ups_test = None    # running UPS self-test: {start, refreshed}
         self.output = self._find_output()
+        self.engine = eng.Engine(self)
+        self.custom = {}           # screen id -> screen dict (screens drawn by the engine)
+        self.screens_cfg = {}
+        self.cdetail = None        # (detail id, item) while a detail screen is open
+        self.hist = {}             # ref -> deque[(t, value)] for history graphs
+        self.web_q = _queue.Queue()
+        self.draft = None          # (screen dict, time) being edited in the builder
+        self.load_screens()
+        if os.environ.get("RACKVIEW_NO_WEB") is None:
+            try:
+                import webui
+                webui.start(self, WEB_PORT)
+                print(time.strftime("%H:%M:%S"), f"builder on http://{local_ip()}:{WEB_PORT}", flush=True)
+            except Exception as e:
+                print("web builder failed to start:", repr(e), flush=True)
+        try:
+            import mqttpub
+            self.mqtt = mqttpub.start(self, CFG)
+        except Exception as e:
+            print("mqtt publisher failed to start:", repr(e), flush=True)
         self.wled = WledLink(WLED_HOST)
         self.door = None           # "open" / "closed" (from the WLED preset the door switch selects)
         self.door_ps = None
@@ -1029,47 +1414,16 @@ class UI:
     def action_label(self):
         p = self.PAGES[self.page]
         m = self.model
-        if p == "overview":
-            return "Silence" if self._unacked() else "Sleep"
-        if p == "servers":
-            return "Next server" if m and len(m["servers"]) > 1 else "Overview"
-        if p == "network":
-            return "Re-ping"
-        if p == "lights":
-            return "LEDs on/off"
-        if p == "ports":
-            return "Stop blink" if self.hunt_active() else ("Blink port" if self.hunt_sel else "Overview")
-        if p == "cooling":
-            nxt = self._next_fan_detail()
-            return f"{nxt} ›" if nxt else "Back"
+        if p in self.custom:
+            return self.custom_action(p, dry=True)
         return "Overview"
 
     def action(self):
         p = self.PAGES[self.page]
         m = self.model
-        if p == "overview":
-            if self._unacked():
-                self.acked |= {a.key for a in m["alerts"]}
-            else:
-                self._set_screen(False)
-        elif p == "servers" and m and len(m["servers"]) > 1:
-            self.srv_idx = (self.srv_idx + 1) % len(m["servers"])
-        elif p == "network":
-            self.data.ping_now.set()
-        elif p == "cooling":
-            self.fan_detail = self._next_fan_detail()      # cycles controllers, then back to the overview
-        elif p == "ports":
-            if self.hunt_active():
-                self.hunt_stop()
-            elif self.hunt_sel:
-                self.hunt_start()
-            else:
-                self.page = 0
-        elif p == "lights":
-            st = self.wled.state
-            self.wled.send({"on": not (st and st.get("on"))})
-        else:
-            self.page = 0
+        if p in self.custom:
+            return self.custom_action(p)
+        self.page = 0
 
     def _unacked(self):
         return bool(self.model) and any(a.sev and a.key not in self.acked for a in self.model["alerts"])
@@ -1092,6 +1446,7 @@ class UI:
         if page != self._led_page:
             self._led_page, self._page_at = page, now
             self.fan_detail = None
+            self.cdetail = None
         alarm = m["overall"] == 2 and self._unacked()
         if not self.screen_on:
             # door closed / asleep: mirror the rack strip; a new critical alarm still pulses red in the middle
@@ -1160,15 +1515,24 @@ class UI:
         self.hits = []
         self.drags = []
         page = self.PAGES[self.page]
+        self.subtitle = None
+        if m:
+            if page in self.custom:
+                self.draw_custom(page)
+            else:
+                self.T("This screen has no layout", 20, MUTED, (CW // 2, H // 2), "center")
         # header
         tr = self.T(self.TITLES[page], 24, TEXT, (14, 9), bold=True)
         self.pg.draw.rect(c, PAGE_COLORS.get(page, (MUTED, None))[0], (tr.x, tr.bottom + 1, tr.w, 3), border_radius=2)
-        sub = ""
-        if page == "servers" and m and m["servers"]:
-            s = m["servers"][self.srv_idx % len(m["servers"])]
-            sub = f"{s['name']}  {self.srv_idx % len(m['servers']) + 1}/{len(m['servers'])}"
+        sub = self.subtitle or ""
+        if page in self.custom and self.cdetail:
+            d = self.detail_screen(page, self.cdetail[0])
+            it = self.cdetail[1]
+            sub = " · ".join(x for x in ((d or {}).get("title"), it.get("name") if isinstance(it, dict) else None) if x)
         if sub:
-            self.T(sub, 18, MUTED, (14 + self.F(24, True).size(self.TITLES[page])[0] + 14, 14))
+            sx = 14 + self.F(24, True).size(self.TITLES[page])[0] + 14
+            dots_x = CW // 2 - (len(self.PAGES) * 16) // 2 + 30 - 12      # keep clear of the page dots
+            self.T(sub, 18 if dots_x - sx > 160 else 14, MUTED, (sx, 14), maxw=max(60, dots_x - sx))
         self.T(time.strftime("%H:%M"), 22, TEXT, (CW - 14, 10), "topright", bold=True)
         if m:
             age = m["ha_age"]
@@ -1184,7 +1548,6 @@ class UI:
             self.pg.draw.circle(c, LINE, (hx, 22), 14, 2)
             self.T("?", 17, TEXT, (hx, 22), "center", bold=True)
             self.hit((hx - 24, 0, 48, 46), lambda: setattr(self, "help", True))
-            getattr(self, "page_" + page)(m)
         else:
             self.T("Connecting to Home Assistant…", 22, MUTED, (CW // 2, H // 2), "center")
         if self.toast and time.monotonic() < self.toast[2]:
@@ -1203,7 +1566,8 @@ class UI:
         cx = 0 if RAIL_SIDE == "right" else RAIL_W
         self.screen.blit(c, (cx, 0))
         self.draw_rail(W - RAIL_W if RAIL_SIDE == "right" else 0)
-        self.pg.display.flip()
+        if not getattr(self, "_composing", False):
+            self.pg.display.flip()
 
     def draw_rail(self, x0):
         s = self.screen
@@ -1243,458 +1607,14 @@ class UI:
                     self.T("hold: help", 11, DIM, (cx, y + 32), "midtop", surf=s)
 
     # -- pages
-    def tile(self, rect, label, value, sub, sev, vcol=None):
+    def tile(self, rect, label, value, sub, sev, vcol=None, stripe=None):
         r = self.pg.Rect(rect)
         self.card(r)
-        self.pg.draw.rect(self.canvas, SEV_COL[sev] if sev is not None else DIM, (r.x, r.y + 10, 4, r.h - 20), border_radius=2)
+        self.pg.draw.rect(self.canvas, stripe or (SEV_COL[sev] if sev is not None else DIM), (r.x, r.y + 10, 4, r.h - 20),
+                          border_radius=2)
         self.T(label, 13, MUTED, (r.x + 14, r.y + 10), maxw=r.w - 20)
         self.T(value, 28, vcol or TEXT, (r.x + 14, r.y + 28), bold=True, maxw=r.w - 20)
         self.T(sub, 13, MUTED, (r.x + 14, r.y + r.h - 22), maxw=r.w - 20)
-
-    def page_overview(self, m):
-        x0, cw = 12, CW - 24
-        al = m["alerts"]
-        sev = m["overall"]
-        r = self.pg.Rect(x0, 50, cw, 54)
-        self.card(r, self.tint(SEV_COL[sev], 0.22))
-        crit = sum(a.sev == 2 for a in al)
-        warn = sum(a.sev == 1 for a in al)
-        if not al:
-            self.T("All systems normal", 24, OK, (r.x + 16, r.centery), "midleft", bold=True)
-        else:
-            if al[0].detail:
-                self.T(al[0].text, 19, SEV_COL[al[0].sev], (r.x + 16, r.y + 7), bold=True, maxw=cw - 170)
-                self.T(al[0].detail, 13, TEXT, (r.x + 16, r.y + 32), maxw=cw - 170)
-            else:
-                self.T(al[0].text, 21, SEV_COL[al[0].sev], (r.x + 16, r.centery), "midleft", bold=True, maxw=cw - 170)
-            parts = ([f"{crit} critical"] if crit else []) + ([f"{warn} warning"] if warn else [])
-            self.T(" · ".join(parts), 15, TEXT, (r.right - 14, r.centery), "midright")
-
-        # tiles
-        y, th = 112, 92
-        tw = (cw - 3 * 8) // 4
-        ups, pdu, fw = m["ups"], m["pdu"], m["fw"]
-        self.tile((x0, y, tw, th), f"UPS · {ups['status'] or '?'}", fmt(ups["batt"], "%"),
-                  f"{fmt(ups['load'], '% load')} · {fmt(ups['runtime'], ' min')}", ups["sev"])
-        self.tile((x0 + (tw + 8), y, tw, th), "Rack power (PDU)", fmt(pdu["watts"], " W"),
-                  f"of {fmt(pdu['budget'], ' W')} budget", pdu["sev"])
-        inet = next((p for p in m["pings"] if p["label"] == "Internet"), None)
-        self.tile((x0 + 2 * (tw + 8), y, tw, th), f"WAN · {fw['wan_gw'] or '?'}",
-                  fmt(inet["ms"] if inet else None, " ms", none="DOWN"),
-                  f"↓{fmt(fw['wan_in'], '', 1)} ↑{fmt(fw['wan_out'], '', 1)} {fw['rate_unit']}", m["page_sev"].get("network", 0))
-        rpms = [f["rpm"] for fc in m["fanctl"] for f in fc["fans"] if f["fitted"] and f["rpm"]]
-        temps = [s["temp"] for s in m["switches"] if s["temp"] is not None]
-        self.tile((x0 + 3 * (tw + 8), y, tw, th), "Rack fans · avg rpm", fmt(sum(rpms) / len(rpms) if rpms else None),
-                  f"switch max {fmt(max(temps) if temps else None, '°F')}", m["page_sev"].get("cooling", 0))
-        for i, pg_name in enumerate(("power", "power", "network", "cooling")):
-            self.hit((x0 + i * (tw + 8), y, tw, th), lambda p=pg_name: self.goto(p))
-
-        # servers
-        y = 212
-        sv = m["servers"]
-        if sv:
-            n = len(sv)
-            sw = (cw - (n - 1) * 8) // n
-            for i, s in enumerate(sv):
-                r = self.pg.Rect(x0 + i * (sw + 8), y, sw, 96)
-                self.card(r)
-                self.hit(r, lambda i=i: self.goto("servers", i))
-                col = SEV_COL[s["sev"]] if s["sev"] else (OK if s["on"] else DIM)
-                self.dot((r.x + 18, r.y + 22), col, 7)
-                self.T(s["name"], 19, TEXT, (r.x + 32, r.y + 10), bold=True, maxw=sw - 40)
-                state = ("ON" if s["on"] else "OFF") + (f" · {s['health']}" if s["health"] not in BAD else "")
-                self.T(state, 15, col if s["sev"] else MUTED, (r.x + 14, r.y + 42), maxw=sw - 20)
-                hot = s["temps"][0] if s["temps"] else None
-                det = f"{fmt(s['watts'], ' W')}" + (f" · {hot[1]:.0f}{hot[2]} {hot[0]}" if hot and s["on"] else "")
-                self.T(det, 13, MUTED, (r.x + 14, r.y + 68), maxw=sw - 20)
-
-        # alerts
-        y = 318
-        r = self.pg.Rect(x0, y, cw, H - y - 10)
-        self.card(r)
-        if not al:
-            self.T("No active alerts", 16, MUTED, (r.x + 16, r.y + 16))
-        rows = (r.h - 16) // 28
-        for i, a in enumerate(al[:rows]):
-            yy = r.y + 12 + i * 28
-            if i == rows - 1 and len(al) > rows:
-                self.T(f"+{len(al) - rows + 1} more", 15, MUTED, (r.x + 34, yy + 2))
-                break
-            self.dot((r.x + 18, yy + 11), SEV_COL[a.sev], 6)
-            tr = self.T(a.text, 16, TEXT if a.key not in self.acked else MUTED, (r.x + 34, yy + 1), maxw=cw - 150)
-            if a.detail and tr.right < r.right - 150:
-                self.T("— " + a.detail, 13, MUTED, (tr.right + 8, yy + 3), maxw=r.right - 110 - tr.right)
-            self.T(self.TITLES.get(a.page, ""), 13, DIM, (r.right - 14, yy + 3), "topright")
-
-    def page_power(self, m):
-        x0 = 12
-        ups, pdu = m["ups"], m["pdu"]
-        # UPS card
-        r = self.pg.Rect(x0, 50, 250, H - 60)
-        self.card(r)
-        self.T("UPS", 15, MUTED, (r.x + 14, r.y + 10))
-        stc = SEV_COL[ups["sev"]] if ups["sev"] else OK
-        self.T(ups["status"] or "no data", 15, stc, (r.right - 14, r.y + 10), "topright", bold=True)
-        self.T(fmt(ups["batt"], "%"), 48, TEXT, (r.x + 14, r.y + 32), bold=True)
-        self.bar((r.x + 14, r.y + 92, r.w - 28, 10), (ups["batt"] or 0) / 100, stc)
-        self.T(fmt(ups["runtime"], " min runtime"), 16, TEXT, (r.x + 14, r.y + 110))
-        self.T("Load", 14, MUTED, (r.x + 14, r.y + 140))
-        self.T(fmt(ups["load"], "%"), 14, TEXT, (r.right - 14, r.y + 140), "topright")
-        lc = WARN if (ups["load"] or 0) > 80 else INFO
-        self.bar((r.x + 14, r.y + 160, r.w - 28, 8), (ups["load"] or 0) / 100, lc)
-        y = r.y + 182
-        w = r.w - 28
-        y = self.kv(r.x + 14, y, w, "Input", f"{fmt(ups['vin'], ' V', 1)} {fmt(ups['freq'], ' Hz')}")
-        y = self.kv(r.x + 14, y, w, "Output", fmt(ups["vout"], " V", 1))
-        y = self.kv(r.x + 14, y, w, "Battery", fmt(ups["bvolt"], " V", 1))
-        y = self.kv(r.x + 14, y, w, "Battery date", ups["bdate"] or "—")
-        y = self.kv(r.x + 14, y, w, "UPS temp", fmt(ups["temp"], "°F", 1))
-        y = self.kv(r.x + 14, y, w, "Self-test", ups["selftest"] or "—")
-        self.T("Last transfer: " + (ups["reason"] or "—"), 12, MUTED, (r.x + 14, y + 2), maxw=w)
-        test = self.ups_test
-        label = f"Testing… {time.time() - test['start']:.0f} s" if test else "Run UPS self-test"
-        self.button((r.x + 14, r.bottom - 52, w, 40), label,
-                    lambda: self.ask("Run UPS self-test?",
-                                     ["The UPS switches to battery for a short test,",
-                                      "then reports the result. Load stays powered."],
-                                     self.start_ups_test),
-                    enabled=ups["present"] and not test)
-
-        # PDU card
-        r = self.pg.Rect(x0 + 258, 50, CW - 24 - 258, H - 60)
-        self.card(r)
-        self.T("PDU outlets", 15, MUTED, (r.x + 14, r.y + 10))
-        pc = SEV_COL[pdu["sev"]] if pdu["sev"] else MUTED
-        self.T(f"{fmt(pdu['watts'], ' W')} / {fmt(pdu['budget'], ' W')}", 15, pc if pdu["sev"] else TEXT,
-               (r.right - 14, r.y + 10), "topright", bold=True)
-        outs = pdu["outlets"]
-        if not outs:
-            self.T("No PDU data", 16, MUTED, (r.x + 14, r.y + 50))
-            return
-        top = max((w or 0) for _, w, _ in outs) or 1
-        cols = 2
-        rows = math.ceil(len(outs) / cols)
-        cwid = (r.w - 28 - 16) // cols
-        rh = min(26, (r.h - 44) // rows)
-        for i, (o, w, sw) in enumerate(outs):
-            cx = r.x + 14 + (i // rows) * (cwid + 16)
-            cy = r.y + 40 + (i % rows) * rh
-            off = sw == "off"
-            self.T(f"{o:>2}", 13, DIM if off else MUTED, (cx, cy + 2))
-            self.bar((cx + 26, cy + 7, cwid - 92, 7), (w or 0) / top, DIM if off else INFO)
-            self.T("off" if off else fmt(w, " W", 0 if (w or 0) >= 10 else 1), 13,
-                   DIM if off or not w else TEXT, (cx + cwid, cy + 2), "topright")
-
-    def page_servers(self, m):
-        x0 = 12
-        sv = m["servers"]
-        if not sv:
-            self.T("No iDRAC servers found", 20, MUTED, (CW // 2, H // 2), "center")
-            return
-        s = sv[self.srv_idx % len(sv)]
-        col = SEV_COL[s["sev"]] if s["sev"] else (OK if s["on"] else DIM)
-        r = self.pg.Rect(x0, 50, 236, H - 60)
-        self.card(r)
-        self.dot((r.x + 22, r.y + 28), col, 10)
-        self.T(s["name"], 26, TEXT, (r.x + 42, r.y + 12), bold=True, maxw=r.w - 52)
-        self.T("POWERED ON" if s["on"] else ("POWERED OFF" if s["power"] == "off" else "NO DATA"), 15,
-               OK if s["on"] else MUTED, (r.x + 14, r.y + 54), bold=True)
-        w = r.w - 28
-        y = r.y + 84
-        hc = SEV_COL[s["sev"]] if s["sev"] else TEXT
-        y = self.kv(r.x + 14, y, w, "Health", s["health"] or "—", hc)
-        y = self.kv(r.x + 14, y, w, "Power", fmt(s["watts"], " W"))
-        y = self.kv(r.x + 14, y, w, "PSU in", f"{fmt(s['psu_v'], ' V')} {fmt(s['psu_a'], ' A', 1)}")
-        y = self.kv(r.x + 14, y, w, "OS", {"on": "running", "off": "not running"}.get(s["os"], "—"))
-        y = self.kv(r.x + 14, y, w, "iDRAC", {"on": "reachable", "off": "unreachable"}.get(s["avail"], "—"),
-                    CRIT if s["avail"] == "off" else TEXT)
-        y = self.kv(r.x + 14, y, w, "Fan redund.", s["redund"] if s["redund"] not in BAD else "—")
-        if s["sev"] and s["on"] and s["health"] not in BAD and s["health"].lower() != "ok":
-            self.T("Why " + s["health"], 13, MUTED, (r.x + 14, y + 2))
-            y += 20
-            if s["reason"] in BAD:
-                for line in self.wrap("Cause not reported. Update the iDRAC MQTT Poller add-on to 1.0.3.", 13, w, 3):
-                    self.T(line, 13, DIM, (r.x + 14, y))
-                    y += 17
-            else:
-                for line in self.wrap(s["reason"], 13, w, 4):
-                    self.T(line, 13, hc, (r.x + 14, y))
-                    y += 17
-            y += 6
-        acts = s["actions"]
-        if acts:
-            rows = (len(acts) + 1) // 2
-            by = r.bottom - 14 - 40 * rows - 8 * (rows - 1)
-            bw = (w - 8) // 2
-            for i, (key, label, ent) in enumerate(acts):
-                bx = r.x + 14 + (i % 2) * (bw + 8)
-                byy = by + (i // 2) * 48
-                bwid = w if len(acts) % 2 and i == len(acts) - 1 else bw
-                pkey = f"{s['id']}-{key}"
-                sent = time.monotonic() - self.pending.get(pkey, -999) < 30
-                essential = s["id"] in ESSENTIAL_SERVERS
-                col = OK if key == "on" else WARN if key == "soft" else INFO
-                body = {"on": [f"Sends IPMI power-on to {s['name']}."],
-                        "soft": [f"Asks {s['name']}'s OS to shut down cleanly",
-                                 "(ACPI power button). Unsaved work is lost."],
-                        "sel": [f"Clears {s['name']}'s iDRAC System Event Log.",
-                                "Health may return to OK if old events caused it."]}[key]
-                if essential and key == "soft":
-                    body = body + ["", f"{s['name']} is ESSENTIAL: the network may go down."]
-                short = {"soft": "Shut down"}.get(key, label)
-                self.button((bx, byy, bwid, 40), "Sent ✓" if sent else short,
-                            lambda key=key, label=label, ent=ent, body=body, pkey=pkey, essential=essential, s=s:
-                            self.ask(f"{label}: {s['name']}?", body,
-                                     lambda: self.send(pkey, f"{label} {s['name']}", "button", "press",
-                                                       {"entity_id": ent}),
-                                     hold=essential or key == "soft", danger=key == "soft"),
-                            col=col, enabled=not sent, size=14)
-            r = self.pg.Rect(r.x, r.y, r.w, by - r.y - 4)   # keep last error above the buttons
-        if s["last_error"] not in BAD:
-            self.T("Last error", 13, MUTED, (r.x + 14, y + 4))
-            words, line, yy = s["last_error"].split(), "", y + 22
-            for wd in words:
-                if self.F(13).size(line + " " + wd)[0] > w:
-                    self.T(line, 13, WARN, (r.x + 14, yy))
-                    line, yy = wd, yy + 17
-                    if yy > r.bottom - 20:
-                        break
-                else:
-                    line = (line + " " + wd).strip()
-            self.T(line, 13, WARN, (r.x + 14, yy))
-
-        r = self.pg.Rect(x0 + 244, 50, CW - 24 - 244, H - 60)
-        self.card(r)
-        y = r.y + 10
-        self.T("Temperatures", 15, MUTED, (r.x + 14, y))
-        y += 26
-        temps = s["temps"]
-        if not temps:
-            self.T("No readings" + ("" if s["on"] else " (server off)"), 15, DIM, (r.x + 14, y))
-            y += 30
-        maxrows = 8 if s["fans"] else 14
-        for label, v, u in temps[:maxrows]:
-            f = v if "F" in u else v * 9 / 5 + 32
-            tc = CRIT if f >= 185 else WARN if f >= 158 else OK
-            self.T(label, 14, TEXT, (r.x + 14, y))
-            self.bar((r.x + 150, y + 6, r.w - 250, 7), (f - 60) / 140, tc)
-            self.T(f"{v:.0f}{u}", 14, TEXT, (r.right - 14, y), "topright")
-            y += 23
-        if s["fans"]:
-            y += 8
-            self.T("Fans", 15, MUTED, (r.x + 14, y))
-            y += 26
-            for n, rpm in s["fans"]:
-                if y > r.bottom - 22:
-                    break
-                self.T(f"Fan {n}", 14, TEXT if rpm else DIM, (r.x + 14, y))
-                self.bar((r.x + 150, y + 6, r.w - 250, 7), (rpm or 0) / 15000, INFO)
-                self.T(fmt(rpm, " rpm"), 14, TEXT if rpm else DIM, (r.right - 14, y), "topright")
-                y += 23
-
-    def page_network(self, m):
-        x0 = 12
-        fw = m["fw"]
-        # firewall
-        r = self.pg.Rect(x0, 50, 330, 248)
-        self.card(r)
-        self.T("Firewall", 15, MUTED, (r.x + 14, r.y + 10))
-        y = r.y + 36
-        w = r.w - 28
-
-        def updown(v, good):
-            return (v or "—"), (OK if v == good else CRIT if v not in BAD else MUTED)
-        for label, (v, c) in [("WAN gateway", updown(fw["wan_gw"], "online")),
-                              ("Backup WAN", updown(fw["bwan_gw"], "online")),
-                              ("LTE (WWAN)", updown(fw["wwan"], "up")),
-                              ("OpenVPN", updown(fw["vpn"], "up"))]:
-            self.dot((r.x + 20, y + 9), c, 5)
-            self.T(label, 14, TEXT, (r.x + 32, y))
-            self.T(v, 14, c, (r.right - 14, y), "topright")
-            y += 24
-        y += 6
-        ru = fw["rate_unit"]
-        y = self.kv(r.x + 14, y, w, "WAN ↓ / ↑", f"{fmt(fw['wan_in'], '', 2)} / {fmt(fw['wan_out'], '', 2)} {ru}", size=15)
-        y = self.kv(r.x + 14, y, w, "LAN ↓ / ↑", f"{fmt(fw['lan_in'], '', 1)} / {fmt(fw['lan_out'], '', 1)} {ru}", size=15)
-        y = self.kv(r.x + 14, y, w, "CPU · mem · temp",
-                    f"{fmt(fw['cpu'], '%')} · {fmt(fw['mem'], '%')} · {fmt(fw['temp'], fw['temp_u'])}", size=15)
-
-        # ping
-        r = self.pg.Rect(x0 + 338, 50, CW - 24 - 338, 248)
-        self.card(r)
-        self.T("Ping from rack", 15, MUTED, (r.x + 14, r.y + 10))
-        y = r.y + 36
-        for p in m["pings"]:
-            c = SEV_COL[p["sev"]] if p["sev"] else (OK if p["ms"] is not None else MUTED)
-            self.dot((r.x + 20, y + 9), c, 5)
-            self.T(p["label"], 14, TEXT, (r.x + 32, y))
-            self.T(fmt(p["ms"], " ms", 1, none="no reply" if p["fails"] else "…"), 14, c if p["sev"] else TEXT,
-                   (r.right - 14, y), "topright")
-            self.T(p["host"], 11, DIM, (r.x + 32, y + 17))
-            y += 36
-
-        # switches
-        y0 = 306
-        sws = m["switches"]
-        ether = {s.get("hostname", ""): s for s in m["etherlight"]}
-        n = max(1, len(sws))
-        sw_w = (CW - 24 - (n - 1) * 8) // n
-        for i, s in enumerate(sws):
-            r = self.pg.Rect(x0 + i * (sw_w + 8), y0, sw_w, H - y0 - 10)
-            self.card(r)
-            c = SEV_COL[s["sev"]] if s["sev"] else OK
-            self.dot((r.x + 18, r.y + 20), c, 6)
-            self.T(s["name"], 16, TEXT, (r.x + 32, r.y + 10), bold=True)
-            self.T(s["state"] or "—", 13, c, (r.right - 14, r.y + 12), "topright")
-            w = r.w - 28
-            y = r.y + 40
-            y = self.kv(r.x + 14, y, w, "Temp", fmt(s["temp"], s["temp_u"], 1), size=15)
-            y = self.kv(r.x + 14, y, w, "CPU / mem", f"{fmt(s['cpu'], '%')} / {fmt(s['mem'], '%')}", size=15)
-            el = next((e for k, e in ether.items() if k.replace("-", "_").lower().startswith(
-                s["name"].replace(" ", "_").lower())), None)
-            if el:
-                on = el.get("state", {}).get("On")
-                bri = el.get("state", {}).get("Brightness")
-                self.kv(r.x + 14, y, w, "Etherlight", f"on · {round(bri * 100 / 255)}%" if on and bri is not None else ("on" if on else "off"), size=15)
-        if not sws:
-            self.T("No switch data", 15, MUTED, (x0 + 14, y0 + 10))
-
-    def _next_fan_detail(self):
-        """Controller the middle button opens next: overview -> 1st online -> 2nd online ... -> overview."""
-        m = self.model
-        names = [fc["name"] for fc in (m["fanctl"] if m else []) if not fc["offline"]]
-        if not names:
-            return None
-        if self.fan_detail not in names:
-            return names[0] if self.fan_detail is None else None
-        i = names.index(self.fan_detail)
-        return names[i + 1] if i + 1 < len(names) else None
-
-    def fan_toggle(self, fc, fans, turn_on):
-        """Turn a set of fans on (immediately) or off (after confirming)."""
-        ents = [f["entity"] for f in fans if f["entity"] and f["state"] not in BAD]
-        if not ents:
-            return
-        label = f"{fc['name']} fan {fans[0]['n']}" if len(fans) == 1 else f"all {fc['name']} fans"
-        key = "fans-" + ",".join(ents)
-        if turn_on:
-            self.send(key, f"{label} on", "fan", "turn_on", {"entity_id": ents})
-        else:
-            self.ask(f"Turn off {label}?", ["The fan" + ("s stop" if len(ents) > 1 else " stops") +
-                                            " cooling the rack until", "you turn " +
-                                            ("them" if len(ents) > 1 else "it") + " back on."],
-                     lambda: self.send(key, f"{label} off", "fan", "turn_off", {"entity_id": ents}), danger=True)
-
-    def page_cooling(self, m):
-        x0 = 12
-        fcs = m["fanctl"]
-        detail = next((fc for fc in fcs if fc["name"] == self.fan_detail), None)
-        if detail:
-            return self.cooling_detail(detail)
-        self.fan_detail = None
-        n = max(1, len(fcs))
-        cw = (CW - 24 - (n - 1) * 8) // n
-        for i, fc in enumerate(fcs):
-            r = self.pg.Rect(x0 + i * (cw + 8), 50, cw, 262)
-            self.card(r)
-            c = SEV_COL[fc["sev"]] if fc["sev"] else OK
-            self.dot((r.x + 18, r.y + 20), c, 6)
-            tr = self.T(f"{fc['name']} ›", 16, TEXT, (r.x + 32, r.y + 10), bold=True)
-            self.hit(tr.inflate(40, 20).move(-10, 0), lambda fc=fc: setattr(self, "fan_detail", fc["name"]))
-            self.T("OFFLINE" if fc["offline"] else f"ESP32 {fmt(fc['esp'], fc['esp_u'])}", 13,
-                   WARN if fc["offline"] else MUTED, (r.right - 14, r.y + 12), "topright")
-            y = r.y + 40
-            top = max([f["rpm"] or 0 for f in fc["fans"]] + [3000])
-            for f in fc["fans"]:
-                fit = f["fitted"] and not fc["offline"]
-                on = f["state"] == "on"
-                fcol = CRIT if f["alert"] else INFO if on or f["state"] in BAD else DIM
-                self.T(f"Fan {f['n']}", 14, TEXT if fit else DIM, (r.x + 14, y))
-                if fit:
-                    self.bar((r.x + 70, y + 6, r.w - 200, 7), (f["rpm"] or 0) / top if on or f["state"] in BAD else 0,
-                             fcol)
-                    if on or f["state"] in BAD:
-                        self.T(f"{fmt(f['rpm'])} rpm", 14, TEXT, (r.right - 54, y), "topright")
-                        self.T(fmt(f["pwm"], "%"), 13, MUTED, (r.right - 14, y + 1), "topright")
-                    else:
-                        self.T("off", 14, MUTED, (r.right - 14, y), "topright", bold=True)
-                else:
-                    self.T("—", 14, DIM, (r.right - 14, y), "topright")
-                y += 30
-            fitted = [f for f in fc["fans"] if f["fitted"]]
-            ctl = [f for f in fitted if f["entity"] and f["state"] not in BAD]
-            any_on = any(f["state"] == "on" for f in fitted)
-            btn = self.pg.Rect(r.x + 12, r.bottom - 52, r.w - 24, 40)
-            if fc["offline"] or not ctl:
-                self.pg.draw.rect(self.canvas, CARD2, btn, border_radius=8)
-                self.T("Controller offline" if fc["offline"] else "No fan control", 14, DIM, btn.center, "center")
-            else:
-                running = sum(1 for f in fitted if f["state"] == "on")
-                self.button(btn, f"ALL FANS {'ON' if any_on else 'OFF'}  ·  {running}/{len(fitted)} running",
-                            lambda fc=fc, ctl=ctl, any_on=any_on: self.fan_toggle(fc, ctl, not any_on),
-                            col=OK if any_on else MUTED, filled=any_on, size=15)
-        # device temperatures
-        r = self.pg.Rect(x0, 320, CW - 24, H - 330)
-        self.hit(r, lambda: None)
-        self.card(r)
-        self.T("Equipment temperatures", 15, MUTED, (r.x + 14, r.y + 10))
-        items = []
-        for s in m["switches"]:
-            items.append((s["name"], s["temp"], s["temp_u"]))
-        fw = m["fw"]
-        if fw["present"]:
-            items.append(("Firewall CPU", fw["temp"], fw["temp_u"]))
-        if m["ups"]["present"]:
-            items.append(("UPS", m["ups"]["temp"], "°F"))
-        for s in m["servers"]:
-            if s["on"] and s["temps"]:
-                items.append((f"{s['name']} (hottest)", s["temps"][0][1], s["temps"][0][2]))
-        cols = 2
-        colw = (r.w - 28 - 20) // cols
-        for i, (label, v, u) in enumerate(items[:8]):
-            cx = r.x + 14 + (i % cols) * (colw + 20)
-            cy = r.y + 36 + (i // cols) * 26
-            f = None if v is None else (v if "F" in u else v * 9 / 5 + 32)
-            tc = MUTED if f is None else CRIT if f >= 185 else WARN if f >= 150 else OK
-            self.dot((cx + 6, cy + 9), tc, 5)
-            self.T(label, 14, TEXT, (cx + 18, cy), maxw=colw - 90)
-            self.T(fmt(v, u, 1), 14, TEXT, (cx + colw, cy), "topright")
-
-    def cooling_detail(self, fc):
-        x0 = 12
-        r = self.pg.Rect(x0, 50, CW - 24, H - 60)
-        self.card(r)
-        self.button((r.x + 12, r.y + 10, 90, 32), "‹ Back", lambda: setattr(self, "fan_detail", None),
-                    col=MUTED, size=14)
-        c = SEV_COL[fc["sev"]] if fc["sev"] else OK
-        self.dot((r.x + 122, r.y + 26), c, 6)
-        self.T(fc["name"], 18, TEXT, (r.x + 136, r.y + 14), bold=True)
-        self.T("OFFLINE" if fc["offline"] else f"ESP32 {fmt(fc['esp'], fc['esp_u'])}", 14,
-               WARN if fc["offline"] else MUTED, (r.right - 14, r.y + 16), "topright")
-        y = r.y + 60
-        top = max([f["rpm"] or 0 for f in fc["fans"]] + [3000])
-        for f in fc["fans"]:
-            fit = f["fitted"] and not fc["offline"]
-            on = f["state"] == "on"
-            row = self.pg.Rect(r.x + 10, y, r.w - 20, 64)
-            self.pg.draw.rect(self.canvas, CARD2 if fit else CARD, row, border_radius=10)
-            self.T(f"Fan {f['n']}", 18, TEXT if fit else DIM, (row.x + 16, row.y + 10), bold=True)
-            if not fit:
-                self.T("not connected" if not fc["offline"] else "offline", 14, DIM, (row.x + 16, row.y + 36))
-                y += 72
-                continue
-            fcol = CRIT if f["alert"] else INFO if on or f["state"] in BAD else DIM
-            self.T("ALARM" if f["alert"] else ("running" if on else "off"), 13,
-                   CRIT if f["alert"] else OK if on else MUTED, (row.x + 16, row.y + 38), bold=True)
-            self.bar((row.x + 120, row.y + 18, row.w - 330, 9), (f["rpm"] or 0) / top if on else 0, fcol)
-            self.T(f"{fmt(f['rpm'])} rpm" if on else "—", 17, TEXT if on else MUTED,
-                   (row.right - 110, row.y + 10), "topright", bold=on)
-            self.T(f"PWM {fmt(f['pwm'], '%')}" if on else "", 13, MUTED, (row.right - 110, row.y + 36), "topright")
-            if f["entity"]:
-                self.button((row.right - 96, row.y + 12, 84, 40), "ON" if on else "OFF",
-                            lambda f=f, on=on: self.fan_toggle(fc, [f], not on),
-                            col=OK if on else MUTED, filled=on, size=16, enabled=f["state"] not in BAD)
-            y += 72
 
     def start_ups_test(self):
         self.ups_test = dict(start=time.time(), refreshed=0.0)
@@ -1724,11 +1644,373 @@ class UI:
                            {"entity_id": [f"sensor.{UPS_PREFIX}_self_test_result", f"sensor.{UPS_PREFIX}_status",
                                           f"sensor.{UPS_PREFIX}_battery"]})
 
-    def goto(self, page, srv=None):
+    # -- screens.json
+    _factory = None
+
+    def default_screens(self):
+        """The factory layouts shipped with the code (layouts/default_screens.json): every page as data."""
+        if UI._factory is None:
+            with open(FACTORY_FILE, encoding="utf-8") as f:
+                UI._factory = json.load(f)
+        return json.loads(json.dumps(UI._factory))
+
+    def factory_screen(self, sid):
+        return next((x for x in self.default_screens()["screens"] if x["id"] == sid), None)
+
+    def migrate_builtin(self, cfg_):
+        """Replace old one-line "builtin" screens with their full factory layout. Returns True if changed."""
+        changed = False
+        for x in cfg_.get("screens", []):
+            root = x.get("root") or {}
+            if root.get("type") == "builtin":
+                f = self.factory_screen((root.get("props") or {}).get("page") or x.get("id"))
+                if f:
+                    x["root"], x["details"] = f["root"], (x.get("details") or []) + f.get("details", [])
+                    if x.get("middle") in (None, "builtin"):
+                        x["middle"] = f.get("middle", "home")
+                    for k in ("middle_label",):
+                        if f.get(k):
+                            x.setdefault(k, f[k])
+                    changed = True
+        return changed
+
+    def load_screens(self):
+        try:
+            with open(SCREENS_FILE, encoding="utf-8") as f:
+                cfg_ = json.load(f)
+        except FileNotFoundError:
+            cfg_ = self.default_screens()
+            try:
+                os.makedirs(os.path.dirname(SCREENS_FILE), exist_ok=True)
+                with open(SCREENS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(cfg_, f, indent=1)
+            except OSError as e:
+                print("screens: cannot write default:", e, flush=True)
+        except ValueError as e:
+            print("screens: invalid JSON, using the factory layouts:", e, flush=True)
+            cfg_ = self.default_screens()
+        if self.migrate_builtin(cfg_):
+            try:
+                os.replace(SCREENS_FILE, SCREENS_FILE + ".pre-layouts")
+                with open(SCREENS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(cfg_, f, indent=1)
+                print("screens: built-in pages converted to editable layouts", flush=True)
+            except OSError as e:
+                print("screens: cannot save converted layouts:", e, flush=True)
+        self.apply_screens(cfg_)
+
+    def apply_screens(self, cfg_):
+        cur = self.PAGES[self.page] if getattr(self, "PAGES", None) and self.page < len(self.PAGES) else None
+        screens = [x for x in cfg_.get("screens", []) if x.get("enabled", True) and x.get("root")]
+        if not screens:
+            cfg_ = self.default_screens()
+            screens = cfg_["screens"]
+        self.screens_cfg = cfg_
+        self.PAGES = [x["id"] for x in screens]
+        self.TITLES = dict(UI.TITLES, **{x["id"]: x.get("title") or x["id"] for x in screens})
+        self.custom = {}
+        for x in screens:
+            self.custom[x["id"]] = x
+            col = x.get("color")
+            if isinstance(col, str) and len(col) == 7 and col.startswith("#"):
+                rgb = tuple(int(col[i:i + 2], 16) for i in (1, 3, 5))
+                PAGE_COLORS[x["id"]] = (rgb, tuple(int(c * 0.55) for c in rgb))
+        self.page = self.PAGES.index(cur) if cur in self.PAGES else min(self.page, len(self.PAGES) - 1)
+        self.cdetail = None
+        refs = eng.ref_strings(cfg_)
+        self.data.extra_re = eng.entity_regex(refs)
+        self.data.rules = cfg_.get("alerts") or []
+        self.data.alert_label = cfg_.get("alertLabel") or ""
+        self.refresh_watch()
+        self.data.refresh.set()
+
+    def refresh_watch(self):
+        """Concrete entities (full attributes) and templates the custom screens need, expanded per item."""
+        watch, tpls, sparks = set(), set(), set()
+
+        def visit(n, item):
+            if not isinstance(n, dict):
+                return
+            p = n.get("props") or {}
+            vals = [p.get(k) for k in ("entity", "target", "value", "max", "min", "ref", "value_ref")]
+            vals += list(p.get("entities") or [])
+            vals += [(p.get("show_if") or {}).get("ref")] + [c.get("ref") for c in p.get("colors") or []]
+            vals += [p.get(k) for k in ("label", "sub", "title", "text")]
+            for v in vals:
+                if not isinstance(v, str) or not v:
+                    continue
+                v2 = eng.templ(v, item)
+                if "{{" in v2:
+                    tpls.add(v2)
+                    continue
+                e = eng.entity_of(v2)
+                if e and "*" not in e and "{" not in e:
+                    watch.add(e)
+            if n.get("type") == "spark" and p.get("entity"):
+                sparks.add(eng.templ(p["entity"], item))
+            if n.get("type") in ("repeater", "listdetail", "chips") and p.get("source"):
+                its = self.engine.items(p, item) if self.model else []
+                for it in its or [None]:
+                    for c in n.get("children") or []:
+                        visit(c, it)
+                    if n.get("type") == "chips":
+                        visit({"props": {"value_ref": p.get("value_ref"), "label": p.get("label")}}, it)
+                return
+            for c in n.get("children") or []:
+                visit(c, item)
+        for _, root in eng.screen_roots(self.screens_cfg):
+            visit(root, None)
+        draft = getattr(self, "draft", None)
+        if draft and time.time() - draft[1] < 120:          # a screen being edited in the builder
+            for _, root in eng.screen_roots({"screens": [draft[0]]}):
+                visit(root, None)
+        for rule in self.screens_cfg.get("alerts") or []:
+            r_ = rule.get("ref") or rule.get("entity") or ""
+            if "{{" in r_:
+                tpls.add(r_)
+            elif eng.entity_of(r_):
+                watch.add(eng.entity_of(r_))
+        self.data.watch = watch
+        self.data.user_tpls = sorted(tpls)
+        if draft and time.time() - draft[1] < 120:
+            self.data.extra_re = eng.entity_regex(eng.ref_strings(self.screens_cfg) + eng.ref_strings({"screens": [draft[0]]}))
+        self.spark_refs = sparks
+
+    def detail_screen(self, page, did):
+        x = self.custom.get(page) or {}
+        return next((d for d in x.get("details") or [] if d.get("id") == did), None)
+
+    def open_detail(self, did, item=None):
+        page = self.PAGES[self.page]
+        if self.detail_screen(page, did):
+            self.cdetail = (did, item)
+
+    def close_detail(self):
+        self.cdetail = None
+
+    def draw_custom(self, page):
+        x = self.custom[page]
+        root, item = x["root"], None
+        if self.cdetail:
+            d = self.detail_screen(page, self.cdetail[0])
+            if d:
+                root, item = d.get("root") or {}, self.cdetail[1]
+        self.engine.draw(root, self.pg.Rect(12, 50, CW - 24, H - 60), item)
+
+    def custom_action(self, page, dry=False):
+        x = self.custom[page]
+        mode = x.get("middle") or "home"
+        if mode == "builtin":
+            mode = (self.factory_screen(x["id"]) or {}).get("middle") or "home"
+        if mode == "details":
+            targets = self.engine.detail_targets(x["root"])
+            if not targets:
+                return "Overview" if dry else self.goto(self.PAGES[0])
+            cur = self.cdetail
+            idx = next((i for i, t in enumerate(targets) if cur and t[0] == cur[0] and t[1] == cur[1]), -1)
+            nxt = targets[idx + 1] if idx + 1 < len(targets) else None
+            if dry:
+                if not nxt:
+                    return "Back"
+                d = self.detail_screen(page, nxt[0]) or {}
+                return (nxt[1].get("name") if isinstance(nxt[1], dict) else d.get("title", "Details")) + " ›"
+            self.cdetail = nxt
+            return
+        if self.cdetail:
+            return "Back" if dry else self.close_detail()
+        if mode == "silence":
+            if dry:
+                return "Silence" if self._unacked() else "Sleep"
+            if self._unacked():
+                self.acked |= {a.key for a in self.model["alerts"]}
+            else:
+                self._set_screen(False)
+            return
+        if mode == "reping":
+            return "Re-ping" if dry else self.data.ping_now.set()
+        if mode == "wled_power":
+            if dry:
+                return "LEDs on/off"
+            st = self.wled.state
+            return self.wled.send({"on": not (st and st.get("on"))})
+        if mode == "hunt":
+            if dry:
+                return "Stop blink" if self.hunt_active() else ("Blink port" if self.hunt_sel else "Overview")
+            if self.hunt_active():
+                return self.hunt_stop()
+            if self.hunt_sel:
+                return self.hunt_start()
+            return setattr(self, "page", 0)
+        if mode == "next":
+            if dry:
+                rep_ = self.engine.first_repeater(x["root"])
+                many = rep_ and len(self.engine.items(rep_.get("props") or {})) > 1
+                return (x.get("middle_label") or "Next item") if many else "Overview"
+            if not self.engine.next_item(x["root"]):
+                self.page = 0
+            return
+        if mode == "back":
+            return "Back" if dry else self.close_detail()
+        return "Overview" if dry else setattr(self, "page", 0)
+
+    # -- shared widgets used by the engine
+    def alert_banner(self, r):
+        m = self.model
+        al, sev = m["alerts"], m["overall"]
+        self.card(r, self.tint(SEV_COL[sev], 0.22))
+        crit = sum(a.sev == 2 for a in al)
+        warn = sum(a.sev == 1 for a in al)
+        if not al:
+            self.T("All systems normal", 24 if r.h >= 50 else 18, OK, (r.x + 16, r.centery), "midleft", bold=True)
+            return
+        if al[0].detail and r.h >= 50:
+            self.T(al[0].text, 19, SEV_COL[al[0].sev], (r.x + 16, r.y + 7), bold=True, maxw=r.w - 170)
+            self.T(al[0].detail, 13, TEXT, (r.x + 16, r.y + 32), maxw=r.w - 170)
+        else:
+            self.T(al[0].text, 21 if r.h >= 50 else 16, SEV_COL[al[0].sev], (r.x + 16, r.centery), "midleft",
+                   bold=True, maxw=r.w - 170)
+        parts = ([f"{crit} critical"] if crit else []) + ([f"{warn} warning"] if warn else [])
+        self.T(" · ".join(parts), 15, TEXT, (r.right - 14, r.centery), "midright")
+
+    def alert_list(self, r, maxn=6):
+        al = self.model["alerts"]
+        self.card(r)
+        if not al:
+            self.T("No active alerts", 16, MUTED, (r.x + 16, r.y + 16))
+            return
+        rows = max(1, min(maxn, (r.h - 16) // 28))
+        for i, a in enumerate(al[:rows]):
+            yy = r.y + 12 + i * 28
+            if i == rows - 1 and len(al) > rows:
+                self.T(f"+{len(al) - rows + 1} more", 15, MUTED, (r.x + 34, yy + 2))
+                break
+            self.dot((r.x + 18, yy + 11), SEV_COL[a.sev], 6)
+            tr = self.T(a.text, 16, TEXT if a.key not in self.acked else MUTED, (r.x + 34, yy + 1), maxw=r.w - 150)
+            if a.detail and tr.right < r.right - 150:
+                self.T("— " + a.detail, 13, MUTED, (tr.right + 8, yy + 3), maxw=r.right - 110 - tr.right)
+            self.T(self.TITLES.get(a.page, ""), 13, DIM, (r.right - 14, yy + 3), "topright")
+
+    def sample_history(self):
+        now = time.time()
+        for ref in getattr(self, "spark_refs", ()):
+            v = self.engine.resolve(ref)
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                continue
+            dq = self.hist.setdefault(ref, deque(maxlen=1500))
+            if not dq or now - dq[-1][0] >= 4.5:
+                dq.append((now, v))
+
+    def history(self, ref, minutes):
+        cut = time.time() - minutes * 60
+        return [v for t_, v in self.hist.get(ref, ()) if t_ >= cut]
+
+    # -- web builder requests (run on the main thread)
+    def handle_web(self):
+        while not self.web_q.empty():
+            req = self.web_q.get()
+            try:
+                if req[0] == "reload":
+                    self.load_screens()
+                elif req[0] == "show":
+                    _, page, did = req[:3]
+                    if page in self.PAGES:
+                        self.page = self.PAGES.index(page)
+                        self._led_page = page
+                        self.cdetail = (did, None) if did else None
+                        self.last_input = time.monotonic()
+                        if not self.screen_on:
+                            self._set_screen(True)
+                elif req[0] == "preview":
+                    _, page, did, box = req
+                    box["png"] = self.render_png(page, did)
+                    box["done"].set()
+                elif req[0] == "draft":
+                    _, screen, did, state, box = req
+                    box["png"], box["rects"] = self.render_draft(screen, did, state)
+                    box["done"].set()
+            except Exception as e:
+                print(time.strftime("%H:%M:%S"), "web request failed:", repr(e), flush=True)
+                if req[0] == "preview":
+                    req[3]["done"].set()
+
+    def render_draft(self, screen, did=None, state=None):
+        """Render an unsaved screen from the builder; returns (png bytes, [(node id, rect)])."""
+        state = state or {}
+        new_refs = self.draft is None or json.dumps(self.draft[0], sort_keys=True) != json.dumps(screen, sort_keys=True)
+        self.draft = (screen, time.time())
+        if new_refs:
+            self.refresh_watch()
+            self.data.refresh.set()
+        sid = screen.get("id") or "__draft__"
+        saved = (list(self.PAGES), dict(self.custom), dict(self.TITLES), self.page, self.cdetail, self.help, self.dialog,
+                 self.toast, self.hits, self.drags, dict(self.engine.tab), dict(self.engine.item))
+        try:
+            if sid not in self.PAGES:
+                self.PAGES.append(sid)
+            self.custom[sid] = screen
+            self.TITLES[sid] = screen.get("title") or sid
+            col = screen.get("color")
+            if isinstance(col, str) and len(col) == 7:
+                rgb = tuple(int(col[i:i + 2], 16) for i in (1, 3, 5))
+                PAGE_COLORS[sid] = (rgb, tuple(int(c * 0.55) for c in rgb))
+            self.page = self.PAGES.index(sid)
+            item = None
+            if did and state.get("detail_item") is not None:
+                its = self.engine.items(state.get("detail_item_src") or {})
+                k = int(state["detail_item"])
+                item = its[k] if 0 <= k < len(its) else None
+            if did and item is None:
+                tg = [t for t in self.engine.detail_targets(screen.get("root") or {}) if t[0] == did]
+                item = tg[0][1] if tg else None
+            self.cdetail = (did, item) if did else None
+            self.engine.tab.update({k: int(v) for k, v in (state.get("tab") or {}).items()})
+            self.engine.item.update({k: int(v) for k, v in (state.get("item") or {}).items()})
+            self.help, self.dialog, self.toast = False, None, None
+            self.engine.record = []
+            self._composing = True
+            self.draw()
+            rects = [(nid, r) for nid, r in self.engine.record]
+            buf = io.BytesIO()
+            self.pg.image.save(self.screen, buf, "preview.png")
+            return buf.getvalue(), rects
+        finally:
+            self.engine.record = None
+            self._composing = False
+            (self.PAGES, self.custom, self.TITLES, self.page, self.cdetail, self.help, self.dialog, self.toast,
+             self.hits, self.drags, tab, item_) = saved
+            self.engine.tab.clear(); self.engine.tab.update(tab)
+            self.engine.item.clear(); self.engine.item.update(item_)
+
+    def render_png(self, page, did=None):
+        if page not in self.PAGES or not self.model:
+            return None
+        saved = (self.page, self.cdetail, self.help, self.dialog, self.toast, self.hits, self.drags)
+        try:
+            self.page = self.PAGES.index(page)
+            self.cdetail = (did, None) if did else None
+            self.help, self.dialog, self.toast = False, None, None
+            self._composing = True
+            self.draw()
+            buf = io.BytesIO()
+            self.pg.image.save(self.screen, buf, "preview.png")
+            return buf.getvalue()
+        finally:
+            self._composing = False
+            self.page, self.cdetail, self.help, self.dialog, self.toast, self.hits, self.drags = saved
+
+    def goto(self, page, item=None):
+        """Show a screen; with an item index, also select that item in the screen's first repeater."""
         self.list_centered.clear()
+        if page not in self.PAGES:
+            return
         self.page = self.PAGES.index(page)
-        if srv is not None:
-            self.srv_idx = srv
+        self.cdetail = None
+        if item is not None and page in self.custom:
+            rep_ = self.engine.first_repeater(self.custom[page]["root"])
+            if rep_:
+                self.engine.item[rep_["id"]] = int(item)
 
     def draw_dialog(self):
         d = self.dialog
@@ -1799,12 +2081,23 @@ class UI:
             y += 42
         self.T("Touch", 15, MUTED, (r.x + 14, y + 4))
         y += 30
-        for line in ["Tap a tile or server to open it.", "Tap the right strip = the buttons.",
-                     "Actions ask to confirm first;", "risky ones need a 1.5 s hold.",
-                     "Any press wakes the screen.",
-                     "Door closed = sleep; open = wake."]:
+        for line in ["Tap a tile or server to open it; the right", "strip works like the buttons. Risky actions",
+                     "need a 1.5 s hold. Door closed = sleep."]:
             self.T(line, 13, TEXT, (r.x + 14, y))
             y += 19
+        # screen builder: address + password reset (needs someone at the rack)
+        import webui
+        y += 8
+        self.T("Screen builder", 15, MUTED, (r.x + 14, y))
+        self.T(f"http://{local_ip()}:{WEB_PORT}", 13, INFO, (r.x + 14, y + 22), maxw=r.w - 28)
+        self.T("password set" if webui.has_password() else "no password yet: first visitor sets it", 12, DIM,
+               (r.x + 14, y + 40), maxw=r.w - 28)
+        self.button((r.x + 12, r.bottom - 48, r.w - 24, 36), "Reset builder password",
+                    lambda: setattr(self, "help", False) or self.ask("Reset the builder password?",
+                                     ["The next person to open the builder page", "chooses a new password."],
+                                     lambda: (webui.reset_password(), self.notify("Builder password cleared", OK, 4)),
+                                     hold=True, danger=True),
+                    col=WARN, size=14, enabled=webui.has_password())
 
     # -- touch widgets
     def drag(self, rect, fn):
@@ -1864,27 +2157,21 @@ class UI:
     def seg_send(self, st, **vals):
         self.wled.send({"seg": [dict(id=i, **vals) for i in self.seg_ids(st)]})
 
-    def page_lights(self, m):
+    def wled_panel(self, R):
+        """Rack WLED controls (power, brightness, colour wheel, swatches, segments, effects/palettes/presets,
+        speed, intensity) inside rect R. Special widget: talks to WLED directly, not through HA."""
         c = self.canvas
-        x0 = 12
-        # sub-tabs
-        for i, (key, label) in enumerate((("rack", "Rack LEDs"), ("other", "Switch & AP lights"))):
-            self.button((x0 + i * 168, 50, 160, 30), label, lambda k=key: setattr(self, "light_tab", k),
-                        col=OK if self.light_tab == key else MUTED, filled=self.light_tab == key, size=13)
-        if self.light_tab == "other":
-            return self.page_lights_other(m)
-
         st, _, _, connected = self.wled.snapshot()
         if not st:
             self.T("Connecting to WLED-Rack…" if not connected else "Waiting for WLED state…", 18, MUTED,
-                   (CW // 2, H // 2 + 20), "center")
+                   R.center, "center")
             return
         segs = st.get("seg", [])
         cur = next((sg for sg in segs if self.seg_sel == "all" or sg.get("id") == self.seg_sel), segs[0] if segs else {})
         on = st.get("on")
 
         # ---- left: power, brightness, colour wheel, swatches, segments
-        r = self.pg.Rect(x0, 88, 268, H - 98)
+        r = self.pg.Rect(R.x, R.y, 268, R.h)
         self.card(r)
         pw = self.pg.Rect(r.x + 12, r.y + 12, 52, 52)
         self.pg.draw.circle(c, OK if on else LINE, pw.center, 26)
@@ -1934,7 +2221,7 @@ class UI:
                         col=OK if self.seg_sel == o else MUTED, filled=self.seg_sel == o, size=13)
 
         # ---- right: effects / palettes / presets list + speed / intensity
-        r = self.pg.Rect(x0 + 276, 88, CW - 24 - 276, H - 98)
+        r = self.pg.Rect(R.x + 276, R.y, R.w - 276, R.h)
         self.card(r)
         for i, (key, label) in enumerate((("fx", "Effects"), ("pal", "Palettes"), ("ps", "Presets"))):
             tw = (r.w - 24 - 12) // 3
@@ -2004,233 +2291,6 @@ class UI:
         self.slider((r.x + 6, y + 66, r.w - 12, 34), "ix", cur.get("ix", 128), 255,
                     lambda v: self.seg_send(st, ix=v), label="Intensity")
 
-    def page_lights_other(self, m):
-        L = m["lights"]
-        r = self.pg.Rect(12, 88, CW - 24, H - 98)
-        self.card(r)
-        y = r.y + 20
-        w = r.w - 28
-        for label, lt in L["extra"]:
-            if not lt:
-                continue
-            on = lt["on"]
-            ok = lt["state"] not in BAD
-            self.T(label, 17, TEXT if ok else DIM, (r.x + 16, y + 6), bold=True)
-            self.button((r.right - 100, y, 84, 36), "ON" if on else "OFF",
-                        lambda lt=lt, on=on: self.data.call("light", "turn_off" if on else "turn_on",
-                                                            {"entity_id": lt["id"]}),
-                        col=OK if on else MUTED, filled=on, size=14, enabled=ok)
-            if "uiwled" in lt["id"]:          # Etherlight supports brightness
-                self.slider((r.x + 170, y, w - 290, 36), lt["id"], lt["b"] if on else 0, 255,
-                            lambda v, lt=lt: self.data.call("light", "turn_on" if v else "turn_off",
-                                                            {"entity_id": lt["id"], **({"brightness": v} if v else {})}),
-                            )
-            y += 70
-
-    def page_hotspot(self, m):
-        hs = m["hotspot"]
-        a = hs["a"]
-        c = self.canvas
-        x0 = 12
-        if not hs["present"]:
-            self.T("No hotspot data in HA", 20, MUTED, (CW // 2, H // 2 - 14), "center")
-            self.T("Install / start the WPSD Hotspot Monitor add-on", 14, DIM, (CW // 2, H // 2 + 14), "center")
-            return
-        orange = (255, 140, 40)
-        lv = a.get("live") or {}
-        on_air = a.get("on_air") == "on"
-
-        # ---- caller banner (WPSD /live/ style)
-        r = self.pg.Rect(x0, 50, CW - 24, 124)
-        k = 0.55 + 0.3 * (0.5 + 0.5 * math.sin(time.time() * 5)) if on_air else 0.32
-        self.pg.draw.rect(c, self.tint(orange, k), r, border_radius=12)
-        if on_air:
-            self.pg.draw.rect(c, orange, r, 3, border_radius=12)
-        call = lv.get("call") or a.get("last_call") or "—"
-        self.T(call, 46, TEXT, (r.x + 18, r.y + 8), bold=True, maxw=300)
-        self.T(lv.get("name") or "", 20, TEXT, (r.x + 20, r.y + 64), bold=True, maxw=300)
-        self.T(lv.get("location") or "", 14, (240, 220, 200), (r.x + 20, r.y + 92), maxw=300)
-        tag = "ON AIR" if on_air else ("LAST CALLER" if lv.get("call") else "")
-        if tag:
-            tw = self.F(12, True).size(tag)[0] + 18
-            chip = self.pg.Rect(r.right - 14 - tw, r.y + 10, tw, 22)
-            self.pg.draw.rect(c, orange if on_air else self.tint(orange, 0.6), chip, border_radius=11)
-            self.T(tag, 12, BG if on_air else TEXT, chip.center, "center", bold=True)
-        tgt = (lv.get("target") or a.get("last_target") or "").replace("BM: ", "")
-        m_tg = re.match(r"(TG\s*\d+)\s*(.*)", tgt)
-        rx = r.x + 340
-        self.T(m_tg.group(1) if m_tg else (tgt or "—"), 30, TEXT, (rx, r.y + 34), bold=True, maxw=r.right - rx - 14)
-        self.T(m_tg.group(2) if m_tg else "", 15, (240, 220, 200), (rx, r.y + 70), maxw=r.right - rx - 14)
-        dur = lv.get("duration") or ""
-        meta = " · ".join(x for x in (lv.get("mode"), lv.get("source"), dur.split(" (")[0],
-                                       f"loss {lv['loss']}" if lv.get("loss") else None) if x)
-        self.T(meta, 13, (240, 220, 200), (rx, r.y + 96), maxw=r.right - rx - 14)
-
-        # ---- talkgroups (BrandMeister)
-        r = self.pg.Rect(x0, 182, 330, H - 192)
-        self.card(r)
-        self.T("Talkgroups · BrandMeister", 15, MUTED, (r.x + 14, r.y + 10))
-        net_ok = a.get("dmr_net") == "on"
-        self.T("linked" if net_ok else "DOWN", 13, OK if net_ok else WARN, (r.right - 14, r.y + 12), "topright", bold=True)
-        y = r.y + 36
-        w = r.w - 28
-        rows = [(t, "static") for t in a.get("tg_static") or []] + [(t, "dynamic") for t in a.get("tg_dynamic") or []] \
-            + [(t, "timed") for t in a.get("tg_timed") or []]
-        if not rows:
-            self.T("No talkgroups linked" if "tg_static" in a else "Waiting for BrandMeister…", 14, DIM, (r.x + 14, y + 4))
-            y += 30
-        for t, kind in rows[:4]:
-            col = {"static": OK, "dynamic": PAGE_COLORS["hotspot"][0], "timed": INFO}[kind]
-            box = self.pg.Rect(r.x + 10, y, r.w - 20, 52)
-            self.pg.draw.rect(c, CARD2, box, border_radius=8)
-            self.pg.draw.rect(c, col, (box.x, box.y + 8, 4, box.h - 16), border_radius=2)
-            self.T(f"TG {t['tg']}", 17, TEXT, (box.x + 14, box.y + 5), bold=True)
-            self.T(t.get("name") or "", 13, MUTED, (box.x + 14, box.y + 26), maxw=box.w - 110)
-            label = kind
-            if t.get("slot"):
-                label += f" · TS{t['slot']}"
-            self.T(label, 12, col, (box.right - 10, box.y + 6), "topright", bold=True)
-            if "expires_in" in t:
-                left = int(t["expires_in"])
-                self.T(f"{left // 60}:{left % 60:02d} left", 12, MUTED, (box.right - 10, box.y + 26), "topright")
-                self.bar((box.x + 14, box.bottom - 6, box.w - 24, 3), left / 900, col)
-            y += 58
-        y += 4
-        auto = a.get("tg_autostatic")
-        y = self.kv(r.x + 14, y, w, "Auto-static", f"TG {auto}" if auto else "none", size=14)
-        y = self.kv(r.x + 14, y, w, "Master", a.get("dmr_master") or (f"BM {a['bm_master']}" if a.get("bm_master") else "—"),
-                    size=14)
-        blocked = a.get("tg_blocked") or []
-        if blocked:
-            y = self.kv(r.x + 14, y, w, "Blocked", ", ".join(map(str, blocked)), WARN, size=14)
-        freq = f"{a['freq_mhz']:.3f} MHz" if a.get("freq_mhz") else "—"
-        self.T(f"{freq} · {a.get('status') or '—'} · {fmt(a.get('cpu_temp_c'), '°C')}", 12, DIM,
-               (r.x + 14, r.bottom - 22), maxw=w)
-
-        # ---- last heard
-        r = self.pg.Rect(x0 + 338, 182, CW - 24 - 338, H - 192)
-        self.card(r)
-        self.T("Last heard", 15, MUTED, (r.x + 14, r.y + 10))
-        self.T(f"{a.get('host', '')}", 12, DIM, (r.right - 14, r.y + 12), "topright")
-        y = r.y + 36
-        lh = a.get("last_heard") or []
-        if not lh:
-            self.T("Nothing heard yet", 14, DIM, (r.x + 14, y))
-        for row in lh[:6]:
-            tx = (row.get("dur") or "").upper() == "TX"
-            call = row.get("callsign") or "?"
-            src = row.get("src") or ""
-            if tx:
-                self.pg.draw.rect(c, self.tint(orange, 0.3), (r.x + 8, y - 3, r.w - 16, 40), border_radius=7)
-            self.T(call, 15, orange if tx else TEXT, (r.x + 14, y), bold=True)
-            self.T(src, 10, OK if src == "RF" else DIM, (r.x + 14 + self.F(15, True).size(call)[0] + 6, y + 4),
-                   bold=src == "RF")
-            tm = (row.get("time") or "").split(" ")
-            self.T(" ".join(tm[:2]) if len(tm) >= 2 else "", 11, MUTED, (r.right - 14, y + 2), "topright")
-            tg = (row.get("target") or "").replace("BM: ", "")
-            self.T(tg, 12, MUTED, (r.x + 14, y + 18), maxw=r.w - 90)
-            self.T("TX" if tx else (f"{row.get('dur')}s" if row.get("dur") else ""), 12, orange if tx else MUTED,
-                   (r.right - 14, y + 18), "topright", bold=tx)
-            y += 42
-
-    def page_ha(self, m):
-        ha = m["ha"]
-        hm = ha["meta"]
-        x0 = 12
-        sy, su = ha["sys"], ha["sys_u"]
-        # ---- left: core status
-        r = self.pg.Rect(x0, 50, 300, H - 60)
-        self.card(r)
-        self.T("Home Assistant", 15, MUTED, (r.x + 14, r.y + 10))
-        okc = OK if m["ha_age"] is not None and m["ha_age"] < 30 else CRIT
-        pill = self.pg.Rect(r.x + 14, r.y + 36, r.w - 28, 46)
-        self.pg.draw.rect(self.canvas, self.tint(okc, 0.3), pill, border_radius=10)
-        self.pg.draw.rect(self.canvas, okc, pill, 2, border_radius=10)
-        self.dot((pill.x + 22, pill.centery), okc, 8)
-        self.T("RUNNING" if okc == OK else "UNREACHABLE", 21, okc, (pill.x + 40, pill.centery), "midleft", bold=True)
-        lat = ha["latency"]
-        self.T(f"{lat * 1000:.0f} ms" if lat else "", 13, MUTED, (pill.right - 12, pill.centery), "midright")
-        y = r.y + 94
-        w = r.w - 28
-        upd_core = hm.get("core_latest") and hm.get("core_latest") != hm.get("core")
-        y = self.kv(r.x + 14, y, w, "Core", (hm.get("core") or "—") + (f" → {hm['core_latest']}" if upd_core else ""),
-                    WARN if upd_core else TEXT, size=15)
-        y = self.kv(r.x + 14, y, w, "Supervisor", hm.get("supervisor") or "—", size=15)
-        y = self.kv(r.x + 14, y, w, "OS", hm.get("os") or "—", size=15)
-        y = self.kv(r.x + 14, y, w, "Entities", f"{hm.get('total', '—')}", size=15)
-        un = hm.get("unavailable")
-        y = self.kv(r.x + 14, y, w, "Unavailable", f"{un}" if un is not None else "—", WARN if un else TEXT, size=15)
-        nt = hm.get("notifications")
-        y = self.kv(r.x + 14, y, w, "Notifications", f"{nt}" if nt is not None else "—", WARN if nt else TEXT, size=15)
-        z = ha["z2m"]
-        y = self.kv(r.x + 14, y, w, "Zigbee2MQTT", {"on": "connected", "off": "DISCONNECTED"}.get(z, "—"),
-                    OK if z == "on" else WARN if z == "off" else DIM, size=15)
-        y += 6
-        self.T("Add-ons reporting", 13, MUTED, (r.x + 14, y))
-        y += 22
-        for label, ok in ha["addons"]:
-            col = OK if ok else DIM if ok is None else WARN
-            self.dot((r.x + 20, y + 8), col, 5)
-            self.T(label, 14, TEXT, (r.x + 32, y))
-            self.T("ok" if ok else "—" if ok is None else "no data", 13, col, (r.right - 14, y + 1), "topright")
-            y += 24
-
-        # ---- right top: host
-        rx = x0 + 308
-        r = self.pg.Rect(rx, 50, CW - 24 - 308, 196)
-        self.card(r)
-        self.T("Host", 15, MUTED, (r.x + 14, r.y + 10))
-        w = r.w - 28
-        y = r.y + 38
-
-        def meter(label, val, txt, frac, col):
-            nonlocal y
-            self.T(label, 14, MUTED, (r.x + 14, y))
-            self.T(txt, 14, TEXT, (r.right - 14, y), "topright")
-            self.bar((r.x + 14, y + 22, w, 8), frac, col)
-            y += 38
-        cpu = sy["processor_use"]
-        meter("CPU", cpu, f"{fmt(cpu, '%')} · load {fmt(sy['load_1m'], '', 2)}", (cpu or 0) / 100,
-              WARN if (cpu or 0) > 80 else INFO)
-        mem = sy["memory_use_percent"]
-        meter("Memory", mem, fmt(mem, "%"), (mem or 0) / 100, WARN if (mem or 0) > 90 else INFO)
-        df, du = sy["disk_free"], sy["disk_use"]
-        dpct = 100 * du / (df + du) if df is not None and du else None
-        meter("Disk", dpct, f"{fmt(du, ' GiB', 1)} used · {fmt(df, ' GiB', 1)} free", (dpct or 0) / 100,
-              WARN if (dpct or 0) > 90 else INFO)
-        t = sy["processor_temperature"]
-        self.T("CPU temp", 14, MUTED, (r.x + 14, y))
-        self.T(fmt(t, su["processor_temperature"].replace("Â", "") or "°", 1), 14, TEXT, (r.right - 14, y), "topright")
-
-        # ---- right bottom: backups + updates
-        r = self.pg.Rect(rx, 254, CW - 24 - 308, H - 264)
-        self.card(r)
-        self.T("Backups & updates", 15, MUTED, (r.x + 14, r.y + 10))
-        y = r.y + 36
-        w = r.w - 28
-        ah = ha["backup_age_h"]
-        bcol = OK if ah is not None and ah < 26 else WARN if ah is not None else DIM
-        y = self.kv(r.x + 14, y, w, "Last backup",
-                    "—" if ah is None else (f"{ah:.0f} h ago" if ah < 48 else f"{ah / 24:.0f} days ago"), bcol, size=15)
-        nxt = ha["backup_next"]
-        try:
-            import datetime as _dt
-            nx = _dt.datetime.fromisoformat(nxt).astimezone().strftime("%a %H:%M")
-        except (TypeError, ValueError):
-            nx = "—"
-        y = self.kv(r.x + 14, y, w, "Next backup", nx, size=15)
-        ups = hm.get("updates") or []
-        if ups:
-            self.T(f"{len(ups)} update{'s' if len(ups) > 1 else ''} available", 14, WARN, (r.x + 14, y + 4), bold=True)
-            y += 26
-            for u in ups[:3]:
-                self.T("• " + u.replace(" Update", "").replace(" Firmware", ""), 13, TEXT, (r.x + 14, y), maxw=w)
-                y += 20
-            if len(ups) > 3:
-                self.T(f"+{len(ups) - 3} more", 12, MUTED, (r.x + 14, y))
-        else:
-            self.T(f"All {hm.get('update_count', '')} components up to date", 14, OK, (r.x + 14, y + 4))
-
     # -- Port Hunt
     def hunt_client(self):
         pm = self.model["portmap"] if self.model else None
@@ -2267,21 +2327,16 @@ class UI:
             self.data.call("uiwled", "set_port", {"switch": PORT_HUNT_SWITCH, "port": self.hunt_port,
                                                   "rgb_color": PORT_HUNT_RGB, "duration_ms": 400}, quiet=True)
 
-    def page_ports(self, m):
-        pm = m["portmap"]
-        c = self.canvas
-        x0 = 12
-        accent = PAGE_COLORS["ports"][0]
-        if not pm["present"]:
-            self.T("No port map in HA yet", 20, MUTED, (CW // 2, H // 2 - 14), "center")
-            self.T("Install / configure the UniFi Port Map add-on", 14, DIM, (CW // 2, H // 2 + 14), "center")
-            return
-        clients = pm["clients"]
-        sel = self.hunt_client()
-        blink_on = self.hunt_active() and (time.monotonic() % 0.8) < 0.45
 
-        # ---- left: client list
-        r = self.pg.Rect(x0, 50, 262, H - 60)
+    def _hunt_view(self):
+        pm = self.model["portmap"] if self.model else {"clients": [], "ports": [], "present": False}
+        return pm, self.hunt_client(), self.hunt_active() and (time.monotonic() % 0.8) < 0.45, PAGE_COLORS["ports"][0]
+
+    def hunt_list(self, r):
+        """Port Hunt: scrolling list of wired clients; tapping one starts blinking its jack."""
+        pm, _, _, accent = self._hunt_view()
+        c = self.canvas
+        clients = pm["clients"]
         self.card(r)
         self.T(f"{len(clients)} wired clients", 15, MUTED, (r.x + 14, r.y + 10))
         lr = self.pg.Rect(r.x + 6, r.y + 36, r.w - 12, r.h - 42)
@@ -2330,11 +2385,12 @@ class UI:
                         self.hunt_start()                  # selecting a client starts the hunt
         self.drag(lr, list_fn)
 
-        # ---- right top: switch faceplate (odd ports on top, even below, like the real jacks)
-        rx = x0 + 270
-        r = self.pg.Rect(rx, 50, CW - 24 - 270, 150)
+    def hunt_faceplate(self, r):
+        """Port Hunt: the 48-port switch faceplate (odd ports on top, like the real jacks) with the jack lit."""
+        pm, sel, blink_on, accent = self._hunt_view()
+        c = self.canvas
         self.card(r)
-        self.T(pm["switch"] or "48-port switch", 15, MUTED, (r.x + 14, r.y + 10))
+        self.T(pm.get("switch") or "48-port switch", 15, MUTED, (r.x + 14, r.y + 10))
         ports = {p.get("port"): p for p in pm["ports"]}
         up = sum(1 for p in pm["ports"] if p.get("up"))
         self.T(f"{up} up", 13, DIM, (r.right - 14, r.y + 12), "topright")
@@ -2350,10 +2406,8 @@ class UI:
                 port = col * 2 + 1 + row_i
                 pr = self.pg.Rect(gx, fy + row_i * (jw + 10), jw, jw)
                 pinfo = ports.get(port)
-                is_sel = sel and int(sel.get("port") or 0) == port
-                if is_sel:
-                    colr = TEXT if blink_on else accent
-                    self.pg.draw.rect(c, colr, pr.inflate(4, 4), border_radius=3)
+                if sel and int(sel.get("port") or 0) == port:
+                    self.pg.draw.rect(c, TEXT if blink_on else accent, pr.inflate(4, 4), border_radius=3)
                 elif pinfo and pinfo.get("up"):
                     self.pg.draw.rect(c, self.tint(OK, 0.55), pr, border_radius=2)
                 else:
@@ -2383,14 +2437,16 @@ class UI:
         else:
             self.T("Pick a client to find its port", 13, DIM, (r.centerx, fy + 2 * (jw + 10) + 6), "midtop")
 
-        # ---- right bottom: selected client + blink control
-        r = self.pg.Rect(rx, 208, CW - 24 - 270, H - 218)
+    def hunt_client_card(self, r):
+        """Port Hunt: the selected client's details and the blink / stop button."""
+        pm, sel, _, accent = self._hunt_view()
         self.card(r)
         if not sel:
             self.T("Tap a client on the left.", 16, MUTED, (r.x + 16, r.y + 16))
             self.T("Its jack lights up here and blinks", 14, DIM, (r.x + 16, r.y + 46))
             self.T("on the real switch.", 14, DIM, (r.x + 16, r.y + 66))
             return
+        ports = {p.get("port"): p for p in pm["ports"]}
         w = r.w - 28
         self.T(str(sel.get("name") or "?"), 22, TEXT, (r.x + 14, r.y + 10), bold=True, maxw=w)
         y = r.y + 44
@@ -2401,8 +2457,8 @@ class UI:
         y = self.kv(r.x + 14, y, w, "Port", f"{sel.get('port')} · {pinfo.get('name') or ''}".strip(" ·"), accent, size=14)
         link = f"{sp} Mbps" if sp else "—"
         y = self.kv(r.x + 14, y, w, "Link · PoE", f"{link} · {poe} W" if poe else link, size=14)
-        y = self.kv(r.x + 14, y, w, "Network", f"{sel.get('network') or '—'}" +
-                    (f" (VLAN {sel['vlan']})" if sel.get("vlan") else ""), size=14)
+        self.kv(r.x + 14, y, w, "Network", f"{sel.get('network') or '—'}" +
+                (f" (VLAN {sel['vlan']})" if sel.get("vlan") else ""), size=14)
         if self.hunt_active():
             left = int(self.hunt_until - time.monotonic())
             self.button((r.x + 12, r.bottom - 50, w + 4, 40), f"STOP BLINKING · {left}s", self.hunt_stop,
@@ -2411,127 +2467,17 @@ class UI:
             self.button((r.x + 12, r.bottom - 50, w + 4, 40), f"BLINK PORT {sel.get('port')}", self.hunt_start,
                         col=accent, size=15)
 
-    def page_time(self, m):
-        t = m["time"]
-        srv = t["server"]
-        x0 = 12
-        c = self.canvas
-        # --- server status card
-        r = self.pg.Rect(x0, 50, 288, H - 60)
-        self.card(r)
-        sn = t["snmp"]
-        self.T("GPS time server", 15, MUTED, (r.x + 14, r.y + 10))
-        self.T("via HA" if t["source"] == "ha" else "direct", 13, DIM, (r.right - 14, r.y + 12), "topright")
-        if t["fails"] >= 2:
-            state, col = "NO REPLY", CRIT
-        elif not srv:
-            state, col = "WAITING…", MUTED
-        elif t["locked"]:
-            state, col = "GPS LOCKED", OK
-        else:
-            state, col = "NOT LOCKED", CRIT
-        pill = self.pg.Rect(r.x + 14, r.y + 36, r.w - 28, 46)
-        self.pg.draw.rect(c, self.tint(col, 0.3), pill, border_radius=10)
-        self.pg.draw.rect(c, col, pill, 2, border_radius=10)
-        self.dot((pill.x + 22, pill.centery), col, 8)
-        self.T(state, 22, col, (pill.x + 40, pill.centery), "midleft", bold=True)
-        y = r.y + 92
-        w = r.w - 28
-        sz = 15
-        if sn:
-            hc = sn["health_code"]
-            y = self.kv(r.x + 14, y, w, "GPS receiver", GPS_HEALTH.get(hc, sn.get("gps_health", "?")),
-                        OK if hc == 8 else WARN if hc in (4, 5, 6, 7) else CRIT, size=sz)
-            y = self.kv(r.x + 14, y, w, "Receiver mode",
-                        {"Hold": "Position hold", "Survey": "Surveying", "Dynamic": "Dynamic"}.get(sn["mode"], sn["mode"]),
-                        size=sz)
-            y = self.kv(r.x + 14, y, w, "Timing", sn.get("timing_status") or "—",
-                        OK if (sn.get("timing_status") or "").lower() == "good" else WARN, size=sz)
-            y = self.kv(r.x + 14, y, w, "Holdover", "no (GPS disciplined)" if not sn["fly"] else f"{sn['fly']} s",
-                        TEXT if not sn["fly"] else WARN, size=sz)
-            if sn["sat_count"]:
-                used = sum(1 for x in sn["sats"] if x["used"])
-                y = self.kv(r.x + 14, y, w, "Satellites", f"{used} used / {sn['sat_count']} tracked", size=sz)
-            else:
-                y = self.kv(r.x + 14, y, w, "Satellites", "not reported (locked)" if hc == 8 else "none", DIM if hc == 8 else CRIT, size=sz)
-            y = self.kv(r.x + 14, y, w, "GPS − UTC", f"{sn.get('utc_offset', '?')} s (leap secs)", size=sz)
-            y = self.kv(r.x + 14, y, w, "Oscillator", (sn.get("freq") or "—").replace(" PPM", " ppm"), size=sz)
-        if srv:
-            leap = {0: "none", 1: "+1 s pending", 2: "−1 s pending", 3: "unsynchronised"}[srv["leap"]]
-            y = self.kv(r.x + 14, y, w, "Stratum", f"{srv['stratum']} · ref {srv['refid']}", size=sz)
-            y = self.kv(r.x + 14, y, w, "Leap second", leap, WARN if srv["leap"] else TEXT, size=sz)
-            prec = 2.0 ** srv["precision"]
-            y = self.kv(r.x + 14, y, w, "Precision · disp.",
-                        f"±{prec * 1e6:.0f} µs · {srv['root_disp'] * 1000:.2f} ms", size=sz)
-            if not sn:
-                age = srv["ref_age"]
-                y = self.kv(r.x + 14, y, w, "Last GPS update", "—" if age is None else f"{age:.0f} s ago",
-                            WARN if age and age > 300 else TEXT, size=sz)
-        else:
-            self.T("Waiting for first reply…", 15, DIM, (r.x + 14, y))
-        if sn:
-            up = re.match(r"(\d+)(?: days?|:)", sn.get("uptime") or "")
-            self.T(f"fw {sn.get('firmware', '?')}" + (f" · up {up.group(1)} d" if up else ""), 11, DIM,
-                   (r.x + 14, r.bottom - 58))
-        if t["ports"]:
-            self.T("LAN ports", 14, MUTED, (r.x + 14, r.bottom - 40))
-            for i, st in enumerate(t["ports"]):
-                pc = OK if st == "up" else DIM
-                bx = r.right - 14 - (len(t["ports"]) - i) * 52
-                self.pg.draw.rect(c, self.tint(pc, 0.35), (bx, r.bottom - 44, 44, 26), border_radius=6)
-                self.T(f"{i + 1} {'up' if st == 'up' else '—'}", 12, pc if st == "up" else MUTED,
-                       (bx + 22, r.bottom - 31), "center", bold=True)
-
-        # --- rack Pi vs server
-        rx = x0 + 296
-        r = self.pg.Rect(rx, 50, CW - 24 - 296, 196)
-        self.card(r)
-        pi = t["pi"]
-        self.T("This Pi vs GPS clock", 15, MUTED, (r.x + 14, r.y + 10))
-        ok_pi = pi.get("synced") and pi.get("server") == TIME_SERVER
-        self.T(f"synced ✓ ({pi.get('client')})" if ok_pi else "NOT synced" if pi else "…", 13,
-               OK if ok_pi else WARN if pi else DIM, (r.right - 14, r.y + 12), "topright", bold=True)
-        if srv and t["fails"] < 2:
-            off = srv["offset"] * 1000
-            big = f"{off * 1000:+.0f} µs" if abs(off) < 1 else f"{off:+.3f} ms"
-            self.T(big, 30, TEXT, (r.x + 14, r.y + 34), bold=True)
-            sub = "offset (measured)"
-            if pi.get("est") is not None:
-                sub += f" · chrony est. {pi['est'] * 1e6:.0f} µs, rms {pi['rms'] * 1e6:.0f} µs"
-            self.T(sub, 12, MUTED, (r.x + 16, r.y + 72), maxw=r.w - 30)
-            jit = t["jitter"]
-            self.T(f"delay {srv['delay'] * 1000:.2f} ms", 14, TEXT, (r.right - 14, r.y + 38), "topright")
-            self.T(f"jitter {jit * 1000:.3f} ms" if jit is not None else "jitter …", 14, TEXT,
-                   (r.right - 14, r.y + 58), "topright")
-        hist = t["history"]
-        g = self.pg.Rect(r.x + 14, r.y + 92, r.w - 28, r.h - 122)
-        self.pg.draw.rect(c, BG, g, border_radius=6)
-        self.pg.draw.line(c, LINE, (g.x, g.centery), (g.right, g.centery))
-        if len(hist) > 1:
-            offs = [o * 1000 for _, o, _ in hist]
-            span = max(0.5, max(abs(o) for o in offs))         # ms, symmetric around 0
-            pts = [(g.x + 4 + i * (g.w - 8) / (len(offs) - 1), g.centery - o / span * (g.h / 2 - 6))
-                   for i, o in enumerate(offs)]
-            self.pg.draw.lines(c, INFO, False, pts, 2)
-            self.T(f"scale ±{span:.2f} ms", 11, DIM, (g.right, g.bottom + 3), "topright")
-            mins = (hist[-1][0] - hist[0][0]) / 60
-            self.T(f"offset history · last {max(1, round(mins))} min", 11, DIM, (g.x, g.bottom + 3))
-
-        # --- network clients
-        r = self.pg.Rect(rx, 254, CW - 24 - 296, H - 264)
-        self.card(r)
-        self.T("Devices following it", 15, MUTED, (r.x + 14, r.y + 10))
-        y = r.y + 36
-        for cl in t["clients"]:
-            st = cl["state"]
-            col = {"gps": OK, "other": WARN, "unreachable": DIM, "pending": DIM}[st]
-            self.dot((r.x + 20, y + 9), col, 5)
-            self.T(cl["label"], 14, TEXT, (r.x + 32, y))
-            rr = cl["r"]
-            txt = {"gps": f"stratum {rr['stratum']} ✓" if rr else "", "other": f"via {rr['refid']}" if rr else "",
-                   "unreachable": "no NTP reply", "pending": "…"}[st]
-            self.T(txt, 13, col if st != "gps" else MUTED, (r.right - 14, y + 1), "topright")
-            y += 34
+    def w_ups_test(self, r):
+        """Run-UPS-self-test button; the result is reported as soon as NUT has it."""
+        ups = self.model["ups"]
+        test = self.ups_test
+        label = f"Testing… {time.time() - test['start']:.0f} s" if test else "Run UPS self-test"
+        self.button(r, label,
+                    lambda: self.ask("Run UPS self-test?",
+                                     ["The UPS switches to battery for a short test,",
+                                      "then reports the result. Load stays powered."],
+                                     self.start_ups_test),
+                    enabled=ups["present"] and not test)
 
     # -- main loop
     def run(self):
@@ -2587,6 +2533,8 @@ class UI:
             if now - last_model >= 1.0:
                 last_model = now
                 self.model = build_model(self.data)
+                self.refresh_watch()
+                self.sample_history()
                 crit = {a.key for a in self.model["alerts"] if a.sev == 2}
                 new = crit - self.seen_crit - self.acked
                 self.seen_crit = crit
@@ -2602,6 +2550,7 @@ class UI:
                     self._set_screen(False)
                 if idle > HOME_AFTER and self.page != 0:
                     self.page = 0
+            self.handle_web()
             self.check_door(now)
             self.track_ups_test()
             self.hunt_tick()

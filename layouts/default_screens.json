@@ -1,0 +1,4178 @@
+{
+ "version": 2,
+ "alertLabel": "rackview_alert",
+ "alerts": [],
+ "screens": [
+  {
+   "id": "overview",
+   "title": "Overview",
+   "color": "#dce1eb",
+   "enabled": true,
+   "middle": "silence",
+   "root": {
+    "id": "ov13",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420
+    },
+    "children": [
+     {
+      "id": "ov1",
+      "type": "banner",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 658,
+       "h": 54
+      }
+     },
+     {
+      "id": "ov2",
+      "type": "tile",
+      "props": {
+       "x": 0,
+       "y": 62,
+       "w": 158,
+       "h": 92,
+       "label": "UPS · ${$ups.status|or:?}",
+       "value": "${$ups.batt|u:%}",
+       "sub": "${$ups.load|d:0|u:% load} · ${$ups.runtime|d:0|u: min}",
+       "stripe": {
+        "ref": "$ups.sev",
+        "map": {
+         "0": "ok",
+         "1": "warn",
+         "2": "crit"
+        },
+        "default": "ok"
+       },
+       "goto": "power"
+      }
+     },
+     {
+      "id": "ov3",
+      "type": "tile",
+      "props": {
+       "x": 166,
+       "y": 62,
+       "w": 158,
+       "h": 92,
+       "label": "Rack power (PDU)",
+       "value": "${$pdu.watts|d:0|u: W}",
+       "sub": "of ${$pdu.budget|d:0|u: W} budget",
+       "stripe": {
+        "ref": "$pdu.sev",
+        "map": {
+         "0": "ok",
+         "1": "warn",
+         "2": "crit"
+        },
+        "default": "ok"
+       },
+       "goto": "power"
+      }
+     },
+     {
+      "id": "ov4",
+      "type": "tile",
+      "props": {
+       "x": 332,
+       "y": 62,
+       "w": 158,
+       "h": 92,
+       "label": "WAN · ${$fw.wan_gw|or:?}",
+       "value": "${$inet.ms|d:0|u: ms|or:DOWN}",
+       "sub": "↓${$fw.wan_in|d:1} ↑${$fw.wan_out|d:1} ${$fw.rate_unit}",
+       "stripe": {
+        "ref": "$page_sev.network",
+        "map": {
+         "0": "ok",
+         "1": "warn",
+         "2": "crit"
+        },
+        "default": "ok"
+       },
+       "goto": "network"
+      }
+     },
+     {
+      "id": "ov5",
+      "type": "tile",
+      "props": {
+       "x": 498,
+       "y": 62,
+       "w": 160,
+       "h": 92,
+       "label": "Rack fans · avg rpm",
+       "value": "${$summary.fan_avg|d:0}",
+       "sub": "switch max ${$summary.switch_tmax|d:0|u:°F}",
+       "stripe": {
+        "ref": "$page_sev.cooling",
+        "map": {
+         "0": "ok",
+         "1": "warn",
+         "2": "crit"
+        },
+        "default": "ok"
+       },
+       "goto": "cooling"
+      }
+     },
+     {
+      "id": "ov11",
+      "type": "repeater",
+      "props": {
+       "x": 0,
+       "y": 162,
+       "w": 658,
+       "h": 96,
+       "source": "model",
+       "path": "$servers",
+       "empty": "",
+       "mode": "all"
+      },
+      "children": [
+       {
+        "id": "ov10",
+        "type": "free",
+        "props": {
+         "x": 0,
+         "y": 0,
+         "h": 96,
+         "bg": "card",
+         "goto": "servers"
+        },
+        "children": [
+         {
+          "id": "ov6",
+          "type": "dot",
+          "props": {
+           "x": 11,
+           "y": 15,
+           "w": 14,
+           "h": 14,
+           "color": "@color",
+           "radius": 7
+          }
+         },
+         {
+          "id": "ov7",
+          "type": "label",
+          "props": {
+           "x": 32,
+           "y": 10,
+           "r": 8,
+           "text": "${@name}",
+           "size": 19,
+           "bold": true
+          }
+         },
+         {
+          "id": "ov8",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 42,
+           "r": 6,
+           "text": "${@state_line}",
+           "size": 15,
+           "color": [
+            {
+             "ref": "@sev",
+             "op": ">",
+             "value": 0,
+             "color": "@color"
+            },
+            {
+             "color": "muted"
+            }
+           ]
+          }
+         },
+         {
+          "id": "ov9",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 68,
+           "r": 6,
+           "text": "${@watts|d:0|u: W}${@hot_text|or:}",
+           "size": 13,
+           "color": "muted"
+          }
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "ov12",
+      "type": "alerts",
+      "props": {
+       "x": 0,
+       "y": 268,
+       "w": 658,
+       "h": 152,
+       "max": 10
+      }
+     }
+    ]
+   },
+   "details": []
+  },
+  {
+   "id": "power",
+   "title": "Power",
+   "color": "#b078ff",
+   "enabled": true,
+   "middle": "home",
+   "root": {
+    "id": "pw27",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420
+    },
+    "children": [
+     {
+      "id": "pw17",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 250,
+       "h": 420,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "pw1",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "UPS",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "pw2",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "r": 14,
+         "text": "${$ups.status|or:no data}",
+         "size": 15,
+         "color": "$ups.color",
+         "bold": true,
+         "align": "right"
+        }
+       },
+       {
+        "id": "pw3",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 32,
+         "r": 14,
+         "text": "${$ups.batt|d:0|u:%}",
+         "size": 48,
+         "bold": true
+        }
+       },
+       {
+        "id": "pw4",
+        "type": "bar",
+        "props": {
+         "x": 14,
+         "y": 92,
+         "w": 222,
+         "h": 10,
+         "value": "$ups.batt",
+         "max": 100,
+         "color": "$ups.color"
+        }
+       },
+       {
+        "id": "pw5",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 110,
+         "r": 14,
+         "text": "${$ups.runtime|d:0|u: min runtime}",
+         "size": 16
+        }
+       },
+       {
+        "id": "pw6",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 140,
+         "text": "Load",
+         "size": 14,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "pw7",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 140,
+         "r": 14,
+         "text": "${$ups.load|d:0|u:%}",
+         "size": 14,
+         "align": "right"
+        }
+       },
+       {
+        "id": "pw8",
+        "type": "bar",
+        "props": {
+         "x": 14,
+         "y": 160,
+         "w": 222,
+         "h": 8,
+         "value": "$ups.load",
+         "max": 100,
+         "color": "$ups.load_color"
+        }
+       },
+       {
+        "id": "pw9",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 182,
+         "r": 14,
+         "label": "Input",
+         "text": "${$ups.vin|d:1|u: V} ${$ups.freq|d:0|u: Hz}",
+         "size": 16
+        }
+       },
+       {
+        "id": "pw10",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 207,
+         "r": 14,
+         "label": "Output",
+         "text": "${$ups.vout|d:1|u: V}",
+         "size": 16
+        }
+       },
+       {
+        "id": "pw11",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 232,
+         "r": 14,
+         "label": "Battery",
+         "text": "${$ups.bvolt|d:1|u: V}",
+         "size": 16
+        }
+       },
+       {
+        "id": "pw12",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 257,
+         "r": 14,
+         "label": "Battery date",
+         "text": "${$ups.bdate|or:—}",
+         "size": 16
+        }
+       },
+       {
+        "id": "pw13",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 282,
+         "r": 14,
+         "label": "UPS temp",
+         "text": "${$ups.temp|d:1|u:°F}",
+         "size": 16
+        }
+       },
+       {
+        "id": "pw14",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 307,
+         "r": 14,
+         "label": "Self-test",
+         "text": "${$ups.selftest|or:—}",
+         "size": 16
+        }
+       },
+       {
+        "id": "pw15",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 334,
+         "r": 14,
+         "text": "Last transfer: ${$ups.reason|or:—}",
+         "size": 12,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "pw16",
+        "type": "ups_test",
+        "props": {
+         "x": 14,
+         "y": 368,
+         "w": 222,
+         "h": 40
+        }
+       }
+      ]
+     },
+     {
+      "id": "pw26",
+      "type": "free",
+      "props": {
+       "x": 258,
+       "y": 0,
+       "w": 400,
+       "h": 420,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "pw18",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "PDU outlets",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "pw19",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "r": 14,
+         "text": "${$pdu.watts|d:0|u: W} / ${$pdu.budget|d:0|u: W}",
+         "size": 15,
+         "color": "$pdu.color",
+         "bold": true,
+         "align": "right"
+        }
+       },
+       {
+        "id": "pw20",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 50,
+         "text": "No PDU data",
+         "size": 16,
+         "color": "muted",
+         "show_if": {
+          "ref": "$pdu.outlets",
+          "op": "is_empty"
+         }
+        }
+       },
+       {
+        "id": "pw25",
+        "type": "repeater",
+        "props": {
+         "x": 14,
+         "y": 40,
+         "w": 372,
+         "h": 376,
+         "source": "model",
+         "path": "$pdu.outlets",
+         "empty": "",
+         "mode": "all",
+         "columns": 2,
+         "flow": "col",
+         "row_h": 26,
+         "fit_rows": true,
+         "gap_x": 16,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "pw24",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 26
+          },
+          "children": [
+           {
+            "id": "pw21",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 2,
+             "text": "${@n|pad:2}",
+             "size": 13,
+             "color": "@num_color"
+            }
+           },
+           {
+            "id": "pw22",
+            "type": "bar",
+            "props": {
+             "x": 26,
+             "y": 7,
+             "w": 86,
+             "h": 7,
+             "value": "@watts",
+             "max": "$pdu.top",
+             "color": "@bar_color"
+            }
+           },
+           {
+            "id": "pw23",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 2,
+             "text": "${@text}",
+             "size": 13,
+             "color": "@color",
+             "align": "right"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "details": []
+  },
+  {
+   "id": "servers",
+   "title": "Servers",
+   "color": "#3cd2e6",
+   "enabled": true,
+   "middle": "next",
+   "root": {
+    "id": "sv39",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420
+    },
+    "children": [
+     {
+      "id": "sv1",
+      "type": "label",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 658,
+       "h": 420,
+       "text": "No iDRAC servers found",
+       "size": 20,
+       "color": "muted",
+       "align": "center",
+       "valign": "middle",
+       "show_if": {
+        "ref": "$servers",
+        "op": "is_empty"
+       }
+      }
+     },
+     {
+      "id": "sv38",
+      "type": "repeater",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 658,
+       "h": 420,
+       "source": "model",
+       "path": "$servers",
+       "empty": "",
+       "header": true
+      },
+      "children": [
+       {
+        "id": "sv37",
+        "type": "free",
+        "props": {
+         "x": 0,
+         "y": 0,
+         "w": 658,
+         "h": 420
+        },
+        "children": [
+         {
+          "id": "sv21",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "w": 236,
+           "h": 420,
+           "bg": "card"
+          },
+          "children": [
+           {
+            "id": "sv2",
+            "type": "dot",
+            "props": {
+             "x": 12,
+             "y": 18,
+             "w": 20,
+             "h": 20,
+             "color": "@color",
+             "radius": 10
+            }
+           },
+           {
+            "id": "sv3",
+            "type": "label",
+            "props": {
+             "x": 42,
+             "y": 12,
+             "r": 10,
+             "text": "${@name}",
+             "size": 26,
+             "bold": true
+            }
+           },
+           {
+            "id": "sv4",
+            "type": "label",
+            "props": {
+             "x": 14,
+             "y": 54,
+             "text": "${@power|map:on=POWERED ON;off=POWERED OFF;*=NO DATA}",
+             "size": 15,
+             "color": {
+              "ref": "@on",
+              "map": {
+               "true": "ok"
+              },
+              "default": "muted"
+             },
+             "bold": true
+            }
+           },
+           {
+            "id": "sv5",
+            "type": "kv",
+            "props": {
+             "x": 14,
+             "y": 84,
+             "r": 14,
+             "label": "Health",
+             "text": "${@health|or:—}",
+             "size": 16,
+             "color": "@health_color"
+            }
+           },
+           {
+            "id": "sv6",
+            "type": "kv",
+            "props": {
+             "x": 14,
+             "y": 109,
+             "r": 14,
+             "label": "Power",
+             "text": "${@watts|d:0|u: W}",
+             "size": 16
+            }
+           },
+           {
+            "id": "sv7",
+            "type": "kv",
+            "props": {
+             "x": 14,
+             "y": 134,
+             "r": 14,
+             "label": "PSU in",
+             "text": "${@psu_v|d:0|u: V} ${@psu_a|d:1|u: A}",
+             "size": 16
+            }
+           },
+           {
+            "id": "sv8",
+            "type": "kv",
+            "props": {
+             "x": 14,
+             "y": 159,
+             "r": 14,
+             "label": "OS",
+             "text": "${@os|map:on=running;off=not running;*=—}",
+             "size": 16
+            }
+           },
+           {
+            "id": "sv9",
+            "type": "kv",
+            "props": {
+             "x": 14,
+             "y": 184,
+             "r": 14,
+             "label": "iDRAC",
+             "text": "${@avail|map:on=reachable;off=unreachable;*=—}",
+             "size": 16,
+             "color": {
+              "ref": "@avail",
+              "map": {
+               "off": "crit"
+              },
+              "default": "text"
+             }
+            }
+           },
+           {
+            "id": "sv10",
+            "type": "kv",
+            "props": {
+             "x": 14,
+             "y": 209,
+             "r": 14,
+             "label": "Fan redund.",
+             "text": "${@redund|or:—}",
+             "size": 16
+            }
+           },
+           {
+            "id": "sv15",
+            "type": "column",
+            "props": {
+             "x": 14,
+             "y": 236,
+             "w": 208,
+             "h": 122,
+             "gap": 0
+            },
+            "children": [
+             {
+              "id": "sv11",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "h": 20,
+               "text": "Why ${@health}",
+               "size": 13,
+               "color": "muted",
+               "mt": 2,
+               "show_if": {
+                "ref": "@why",
+                "op": "==",
+                "value": true
+               }
+              }
+             },
+             {
+              "id": "sv12",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "text": "${@reason_text}",
+               "size": 13,
+               "color": "@reason_color",
+               "wrap": 4,
+               "show_if": {
+                "ref": "@why",
+                "op": "==",
+                "value": true
+               }
+              }
+             },
+             {
+              "id": "sv13",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "h": 22,
+               "text": "Last error",
+               "size": 13,
+               "color": "muted",
+               "mt": 6,
+               "show_if": {
+                "ref": "@has_error",
+                "op": "==",
+                "value": true
+               }
+              }
+             },
+             {
+              "id": "sv14",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "text": "${@last_error}",
+               "size": 13,
+               "color": "warn",
+               "wrap": 6,
+               "show_if": {
+                "ref": "@has_error",
+                "op": "==",
+                "value": true
+               }
+              }
+             }
+            ]
+           },
+           {
+            "id": "sv20",
+            "type": "row",
+            "props": {
+             "x": 14,
+             "y": 366,
+             "w": 208,
+             "h": 40,
+             "gap": 8
+            },
+            "children": [
+             {
+              "id": "sv16",
+              "type": "button",
+              "props": {
+               "label": "Power On",
+               "color": "ok",
+               "service": "button.press",
+               "target": "button.idrac_{id}_power_on",
+               "confirm": "@confirm",
+               "confirm_title": "Power On: {item}?",
+               "confirm_text": "Sends IPMI power-on to {item}.",
+               "exact": true,
+               "show_if": {
+                "ref": "@can.on",
+                "op": "==",
+                "value": true
+               }
+              }
+             },
+             {
+              "id": "sv17",
+              "type": "button",
+              "props": {
+               "label": "Shut down",
+               "color": "warn",
+               "service": "button.press",
+               "target": "button.idrac_{id}_soft_shutdown",
+               "confirm": "hold",
+               "confirm_title": "Soft Shutdown: {item}?",
+               "confirm_text": "Asks {item}'s OS to shut down cleanly\n(ACPI power button). Unsaved work is lost.",
+               "exact": true,
+               "show_if": {
+                "ref": "@soft_norm",
+                "op": "==",
+                "value": true
+               },
+               "danger": true
+              }
+             },
+             {
+              "id": "sv18",
+              "type": "button",
+              "props": {
+               "label": "Shut down",
+               "color": "warn",
+               "service": "button.press",
+               "target": "button.idrac_{id}_soft_shutdown",
+               "confirm": "hold",
+               "confirm_title": "Soft Shutdown: {item}?",
+               "confirm_text": "Asks {item}'s OS to shut down cleanly\n(ACPI power button). Unsaved work is lost.\n\n{item} is ESSENTIAL: the network may go down.",
+               "exact": true,
+               "show_if": {
+                "ref": "@soft_ess",
+                "op": "==",
+                "value": true
+               },
+               "danger": true
+              }
+             },
+             {
+              "id": "sv19",
+              "type": "button",
+              "props": {
+               "label": "Clear SEL",
+               "color": "info",
+               "service": "button.press",
+               "target": "button.idrac_{id}_clear_sel",
+               "confirm": "@confirm",
+               "confirm_title": "Clear SEL: {item}?",
+               "confirm_text": "Clears {item}'s iDRAC System Event Log.\nHealth may return to OK if old events caused it.",
+               "exact": true,
+               "show_if": {
+                "ref": "@can.sel",
+                "op": "==",
+                "value": true
+               }
+              }
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "id": "sv36",
+          "type": "free",
+          "props": {
+           "x": 244,
+           "y": 0,
+           "w": 414,
+           "h": 420,
+           "bg": "card"
+          },
+          "children": [
+           {
+            "id": "sv22",
+            "type": "label",
+            "props": {
+             "x": 14,
+             "y": 10,
+             "text": "Temperatures",
+             "size": 15,
+             "color": "muted"
+            }
+           },
+           {
+            "id": "sv35",
+            "type": "column",
+            "props": {
+             "x": 14,
+             "y": 36,
+             "w": 386,
+             "h": 374,
+             "gap": 0
+            },
+            "children": [
+             {
+              "id": "sv23",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "h": 30,
+               "text": "${@no_temps}",
+               "size": 15,
+               "color": "dim",
+               "show_if": {
+                "ref": "@temps",
+                "op": "is_empty"
+               }
+              }
+             },
+             {
+              "id": "sv28",
+              "type": "repeater",
+              "props": {
+               "source": "model",
+               "path": "@temps",
+               "mode": "all",
+               "columns": 1,
+               "row_h": 23,
+               "gap_y": 0,
+               "max": "@temps_max",
+               "empty": ""
+              },
+              "children": [
+               {
+                "id": "sv27",
+                "type": "free",
+                "props": {
+                 "x": 0,
+                 "y": 0,
+                 "h": 23
+                },
+                "children": [
+                 {
+                  "id": "sv24",
+                  "type": "label",
+                  "props": {
+                   "x": 0,
+                   "y": 0,
+                   "r": 250,
+                   "text": "${@name}",
+                   "size": 14
+                  }
+                 },
+                 {
+                  "id": "sv25",
+                  "type": "bar",
+                  "props": {
+                   "x": 136,
+                   "y": 6,
+                   "w": 164,
+                   "h": 7,
+                   "value": "@f",
+                   "max": 200,
+                   "min": 60,
+                   "color": "@color"
+                  }
+                 },
+                 {
+                  "id": "sv26",
+                  "type": "label",
+                  "props": {
+                   "x": 0,
+                   "y": 0,
+                   "text": "${@value|d:0}${@unit}",
+                   "size": 14,
+                   "align": "right"
+                  }
+                 }
+                ]
+               }
+              ]
+             },
+             {
+              "id": "sv29",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "h": 34,
+               "text": "Fans",
+               "size": 15,
+               "color": "muted",
+               "mt": 8,
+               "show_if": {
+                "ref": "@fans",
+                "op": "not_empty"
+               }
+              }
+             },
+             {
+              "id": "sv34",
+              "type": "repeater",
+              "props": {
+               "source": "model",
+               "path": "@fans",
+               "mode": "all",
+               "columns": 1,
+               "row_h": 23,
+               "gap_y": 0,
+               "empty": ""
+              },
+              "children": [
+               {
+                "id": "sv33",
+                "type": "free",
+                "props": {
+                 "x": 0,
+                 "y": 0,
+                 "h": 23
+                },
+                "children": [
+                 {
+                  "id": "sv30",
+                  "type": "label",
+                  "props": {
+                   "x": 0,
+                   "y": 0,
+                   "text": "Fan ${@n}",
+                   "size": 14,
+                   "color": {
+                    "ref": "@rpm",
+                    "map": {
+                     "": "dim",
+                     "0": "dim"
+                    },
+                    "default": "text"
+                   }
+                  }
+                 },
+                 {
+                  "id": "sv31",
+                  "type": "bar",
+                  "props": {
+                   "x": 136,
+                   "y": 6,
+                   "w": 164,
+                   "h": 7,
+                   "value": "@rpm",
+                   "max": 15000,
+                   "color": "info"
+                  }
+                 },
+                 {
+                  "id": "sv32",
+                  "type": "label",
+                  "props": {
+                   "x": 0,
+                   "y": 0,
+                   "text": "${@rpm|d:0|u: rpm}",
+                   "size": 14,
+                   "color": {
+                    "ref": "@rpm",
+                    "map": {
+                     "": "dim",
+                     "0": "dim"
+                    },
+                    "default": "text"
+                   },
+                   "align": "right"
+                  }
+                 }
+                ]
+               }
+              ]
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "details": [],
+   "middle_label": "Next server"
+  },
+  {
+   "id": "network",
+   "title": "Network",
+   "color": "#5a8cff",
+   "enabled": true,
+   "middle": "reping",
+   "root": {
+    "id": "nw28",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420
+    },
+    "children": [
+     {
+      "id": "nw10",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 330,
+       "h": 248,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "nw1",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "Firewall",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "nw6",
+        "type": "repeater",
+        "props": {
+         "x": 0,
+         "y": 36,
+         "w": 330,
+         "h": 96,
+         "source": "model",
+         "path": "$fw.links",
+         "empty": "",
+         "mode": "all",
+         "columns": 1,
+         "row_h": 24,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "nw5",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 24
+          },
+          "children": [
+           {
+            "id": "nw2",
+            "type": "dot",
+            "props": {
+             "x": 15,
+             "y": 4,
+             "w": 10,
+             "h": 10,
+             "color": "@color",
+             "radius": 5
+            }
+           },
+           {
+            "id": "nw3",
+            "type": "label",
+            "props": {
+             "x": 32,
+             "y": 0,
+             "text": "${@name}",
+             "size": 14
+            }
+           },
+           {
+            "id": "nw4",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "r": 14,
+             "text": "${@value}",
+             "size": 14,
+             "color": "@color",
+             "align": "right"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "nw7",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 138,
+         "r": 14,
+         "label": "WAN ↓ / ↑",
+         "text": "${$fw.wan_in|d:2} / ${$fw.wan_out|d:2} ${$fw.rate_unit}",
+         "size": 15
+        }
+       },
+       {
+        "id": "nw8",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 162,
+         "r": 14,
+         "label": "LAN ↓ / ↑",
+         "text": "${$fw.lan_in|d:1} / ${$fw.lan_out|d:1} ${$fw.rate_unit}",
+         "size": 15
+        }
+       },
+       {
+        "id": "nw9",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 186,
+         "r": 14,
+         "label": "CPU · mem · temp",
+         "text": "${$fw.cpu|d:0|u:%} · ${$fw.mem|d:0|u:%} · ${$fw.temp|d:0|u:$fw.temp_u}",
+         "size": 15
+        }
+       }
+      ]
+     },
+     {
+      "id": "nw18",
+      "type": "free",
+      "props": {
+       "x": 338,
+       "y": 0,
+       "w": 320,
+       "h": 248,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "nw11",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "Ping from rack",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "nw17",
+        "type": "repeater",
+        "props": {
+         "x": 0,
+         "y": 36,
+         "w": 320,
+         "h": 212,
+         "source": "model",
+         "path": "$pings",
+         "empty": "",
+         "mode": "all",
+         "columns": 1,
+         "row_h": 36,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "nw16",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 36
+          },
+          "children": [
+           {
+            "id": "nw12",
+            "type": "dot",
+            "props": {
+             "x": 15,
+             "y": 4,
+             "w": 10,
+             "h": 10,
+             "color": "@color",
+             "radius": 5
+            }
+           },
+           {
+            "id": "nw13",
+            "type": "label",
+            "props": {
+             "x": 32,
+             "y": 0,
+             "text": "${@label}",
+             "size": 14
+            }
+           },
+           {
+            "id": "nw14",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "r": 14,
+             "text": "${@ms|d:1|u: ms|or:@none_text}",
+             "size": 14,
+             "color": "@vcolor",
+             "align": "right"
+            }
+           },
+           {
+            "id": "nw15",
+            "type": "label",
+            "props": {
+             "x": 32,
+             "y": 17,
+             "text": "${@host}",
+             "size": 11,
+             "color": "dim"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "nw26",
+      "type": "repeater",
+      "props": {
+       "x": 0,
+       "y": 256,
+       "w": 658,
+       "h": 154,
+       "source": "model",
+       "path": "$switches",
+       "empty": "",
+       "mode": "all"
+      },
+      "children": [
+       {
+        "id": "nw25",
+        "type": "free",
+        "props": {
+         "x": 0,
+         "y": 0,
+         "h": 154,
+         "bg": "card"
+        },
+        "children": [
+         {
+          "id": "nw19",
+          "type": "dot",
+          "props": {
+           "x": 12,
+           "y": 14,
+           "w": 12,
+           "h": 12,
+           "color": "@color",
+           "radius": 6
+          }
+         },
+         {
+          "id": "nw20",
+          "type": "label",
+          "props": {
+           "x": 32,
+           "y": 10,
+           "r": 80,
+           "text": "${@name}",
+           "size": 16,
+           "bold": true
+          }
+         },
+         {
+          "id": "nw21",
+          "type": "label",
+          "props": {
+           "x": 0,
+           "y": 12,
+           "r": 14,
+           "text": "${@state|or:—}",
+           "size": 13,
+           "color": "@color",
+           "align": "right"
+          }
+         },
+         {
+          "id": "nw22",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 40,
+           "r": 14,
+           "label": "Temp",
+           "text": "${@temp|d:1|u:@temp_u}",
+           "size": 15
+          }
+         },
+         {
+          "id": "nw23",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 64,
+           "r": 14,
+           "label": "CPU / mem",
+           "text": "${@cpu|d:0|u:%} / ${@mem|d:0|u:%}",
+           "size": 15
+          }
+         },
+         {
+          "id": "nw24",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 88,
+           "r": 14,
+           "label": "Etherlight",
+           "text": "${@etherlight}",
+           "size": 15,
+           "show_if": {
+            "ref": "@etherlight",
+            "op": "not_empty"
+           }
+          }
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "nw27",
+      "type": "label",
+      "props": {
+       "x": 14,
+       "y": 266,
+       "text": "No switch data",
+       "size": 15,
+       "color": "muted",
+       "show_if": {
+        "ref": "$switches",
+        "op": "is_empty"
+       }
+      }
+     }
+    ]
+   },
+   "details": []
+  },
+  {
+   "id": "ports",
+   "title": "Port Hunt",
+   "color": "#00d2b4",
+   "enabled": true,
+   "middle": "hunt",
+   "root": {
+    "id": "ph6",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420
+    },
+    "children": [
+     {
+      "id": "ph1",
+      "type": "label",
+      "props": {
+       "x": 0,
+       "y": 166,
+       "w": 658,
+       "text": "No port map in HA yet",
+       "size": 20,
+       "color": "muted",
+       "align": "center",
+       "show_if": {
+        "ref": "$portmap.present",
+        "op": "==",
+        "value": false
+       }
+      }
+     },
+     {
+      "id": "ph2",
+      "type": "label",
+      "props": {
+       "x": 0,
+       "y": 194,
+       "w": 658,
+       "text": "Install / configure the UniFi Port Map add-on",
+       "size": 14,
+       "color": "dim",
+       "align": "center",
+       "show_if": {
+        "ref": "$portmap.present",
+        "op": "==",
+        "value": false
+       }
+      }
+     },
+     {
+      "id": "ph3",
+      "type": "hunt_list",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 262,
+       "h": 420,
+       "show_if": {
+        "ref": "$portmap.present",
+        "op": "==",
+        "value": true
+       }
+      }
+     },
+     {
+      "id": "ph4",
+      "type": "hunt_faceplate",
+      "props": {
+       "x": 270,
+       "y": 0,
+       "w": 388,
+       "h": 150,
+       "show_if": {
+        "ref": "$portmap.present",
+        "op": "==",
+        "value": true
+       }
+      }
+     },
+     {
+      "id": "ph5",
+      "type": "hunt_client",
+      "props": {
+       "x": 270,
+       "y": 158,
+       "w": 388,
+       "h": 262,
+       "show_if": {
+        "ref": "$portmap.present",
+        "op": "==",
+        "value": true
+       }
+      }
+     }
+    ]
+   },
+   "details": []
+  },
+  {
+   "id": "time",
+   "title": "Time",
+   "color": "#ff6ebe",
+   "enabled": true,
+   "middle": "home",
+   "root": {
+    "id": "tm40",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420
+    },
+    "children": [
+     {
+      "id": "tm23",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 288,
+       "h": 420,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "tm1",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "GPS time server",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "tm2",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 12,
+         "r": 14,
+         "text": "${$time.source_text}",
+         "size": 13,
+         "color": "dim",
+         "align": "right"
+        }
+       },
+       {
+        "id": "tm3",
+        "type": "pill",
+        "props": {
+         "x": 14,
+         "y": 36,
+         "w": 260,
+         "h": 46,
+         "text": "${$time.state_text}",
+         "color": "$time.state_color",
+         "size": 22
+        }
+       },
+       {
+        "id": "tm16",
+        "type": "column",
+        "props": {
+         "x": 14,
+         "y": 92,
+         "w": 260,
+         "h": 262,
+         "gap": 0
+        },
+        "children": [
+         {
+          "id": "tm4",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 0,
+           "label": "GPS receiver",
+           "text": "${$time.gps.receiver}",
+           "size": 15,
+           "color": "$time.gps.receiver_color",
+           "show_if": {
+            "ref": "$time.gps",
+            "op": "not_empty"
+           }
+          }
+         },
+         {
+          "id": "tm5",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 0,
+           "label": "Receiver mode",
+           "text": "${$time.gps.mode}",
+           "size": 15,
+           "show_if": {
+            "ref": "$time.gps",
+            "op": "not_empty"
+           }
+          }
+         },
+         {
+          "id": "tm6",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 0,
+           "label": "Timing",
+           "text": "${$time.gps.timing}",
+           "size": 15,
+           "color": "$time.gps.timing_color",
+           "show_if": {
+            "ref": "$time.gps",
+            "op": "not_empty"
+           }
+          }
+         },
+         {
+          "id": "tm7",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 0,
+           "label": "Holdover",
+           "text": "${$time.gps.holdover}",
+           "size": 15,
+           "color": "$time.gps.holdover_color",
+           "show_if": {
+            "ref": "$time.gps",
+            "op": "not_empty"
+           }
+          }
+         },
+         {
+          "id": "tm8",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 0,
+           "label": "Satellites",
+           "text": "${$time.gps.sats}",
+           "size": 15,
+           "color": "$time.gps.sats_color",
+           "show_if": {
+            "ref": "$time.gps",
+            "op": "not_empty"
+           }
+          }
+         },
+         {
+          "id": "tm9",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 0,
+           "label": "GPS − UTC",
+           "text": "${$time.gps.utc}",
+           "size": 15,
+           "show_if": {
+            "ref": "$time.gps",
+            "op": "not_empty"
+           }
+          }
+         },
+         {
+          "id": "tm10",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 0,
+           "label": "Oscillator",
+           "text": "${$time.gps.osc}",
+           "size": 15,
+           "show_if": {
+            "ref": "$time.gps",
+            "op": "not_empty"
+           }
+          }
+         },
+         {
+          "id": "tm11",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 0,
+           "label": "Stratum",
+           "text": "${$time.srv.stratum}",
+           "size": 15,
+           "show_if": {
+            "ref": "$time.srv",
+            "op": "not_empty"
+           }
+          }
+         },
+         {
+          "id": "tm12",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 0,
+           "label": "Leap second",
+           "text": "${$time.srv.leap}",
+           "size": 15,
+           "color": "$time.srv.leap_color",
+           "show_if": {
+            "ref": "$time.srv",
+            "op": "not_empty"
+           }
+          }
+         },
+         {
+          "id": "tm13",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 0,
+           "label": "Precision · disp.",
+           "text": "${$time.srv.precision}",
+           "size": 15,
+           "show_if": {
+            "ref": "$time.srv",
+            "op": "not_empty"
+           }
+          }
+         },
+         {
+          "id": "tm14",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 0,
+           "label": "Last GPS update",
+           "text": "${$time.srv.last_update}",
+           "size": 15,
+           "color": "$time.srv.last_update_color",
+           "show_if": {
+            "ref": "$time.direct",
+            "op": "==",
+            "value": true
+           }
+          }
+         },
+         {
+          "id": "tm15",
+          "type": "label",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "text": "Waiting for first reply…",
+           "size": 15,
+           "color": "dim",
+           "show_if": {
+            "ref": "$time.server",
+            "op": "is_empty"
+           }
+          }
+         }
+        ]
+       },
+       {
+        "id": "tm17",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 362,
+         "text": "${$time.gps.fw_line}",
+         "size": 11,
+         "color": "dim",
+         "show_if": {
+          "ref": "$time.gps",
+          "op": "not_empty"
+         }
+        }
+       },
+       {
+        "id": "tm18",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 380,
+         "text": "LAN ports",
+         "size": 14,
+         "color": "muted",
+         "show_if": {
+          "ref": "$time.lan_ports",
+          "op": "not_empty"
+         }
+        }
+       },
+       {
+        "id": "tm22",
+        "type": "repeater",
+        "props": {
+         "x": 14,
+         "y": 376,
+         "w": 260,
+         "h": 26,
+         "source": "model",
+         "path": "$time.lan_ports",
+         "empty": "",
+         "mode": "all",
+         "columns": 8,
+         "row_h": 26,
+         "cell_w": 44,
+         "gap_x": 8,
+         "align": "right"
+        },
+        "children": [
+         {
+          "id": "tm21",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "w": 44,
+           "h": 26
+          },
+          "children": [
+           {
+            "id": "tm19",
+            "type": "box",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "w": 44,
+             "h": 26,
+             "color": "@color",
+             "tint": 0.35,
+             "radius": 6
+            }
+           },
+           {
+            "id": "tm20",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "w": 44,
+             "h": 26,
+             "text": "${@text}",
+             "size": 12,
+             "color": "@tcolor",
+             "bold": true,
+             "align": "center",
+             "valign": "middle"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "tm32",
+      "type": "free",
+      "props": {
+       "x": 296,
+       "y": 0,
+       "w": 362,
+       "h": 196,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "tm24",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "This Pi vs GPS clock",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "tm25",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 12,
+         "r": 14,
+         "text": "${$time.pi_text}",
+         "size": 13,
+         "color": "$time.pi_color",
+         "bold": true,
+         "align": "right"
+        }
+       },
+       {
+        "id": "tm26",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 34,
+         "w": 200,
+         "text": "${$time.offset_text}",
+         "size": 30,
+         "bold": true,
+         "show_if": {
+          "ref": "$time.measured",
+          "op": "==",
+          "value": true
+         }
+        }
+       },
+       {
+        "id": "tm27",
+        "type": "label",
+        "props": {
+         "x": 16,
+         "y": 72,
+         "r": 14,
+         "text": "${$time.offset_sub}",
+         "size": 12,
+         "color": "muted",
+         "show_if": {
+          "ref": "$time.measured",
+          "op": "==",
+          "value": true
+         }
+        }
+       },
+       {
+        "id": "tm28",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 38,
+         "w": 150,
+         "r": 14,
+         "text": "${$time.delay_text}",
+         "size": 14,
+         "align": "right",
+         "show_if": {
+          "ref": "$time.measured",
+          "op": "==",
+          "value": true
+         }
+        }
+       },
+       {
+        "id": "tm29",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 58,
+         "w": 150,
+         "r": 14,
+         "text": "${$time.jitter_text}",
+         "size": 14,
+         "align": "right",
+         "show_if": {
+          "ref": "$time.measured",
+          "op": "==",
+          "value": true
+         }
+        }
+       },
+       {
+        "id": "tm30",
+        "type": "graph",
+        "props": {
+         "x": 14,
+         "y": 92,
+         "w": 334,
+         "h": 74,
+         "source": "$time.history",
+         "field": 1,
+         "scale": 1000,
+         "symmetric": true,
+         "min_span": 0.5,
+         "caption": "ms",
+         "color": "info"
+        }
+       },
+       {
+        "id": "tm31",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 169,
+         "w": 200,
+         "text": "${$time.history_text}",
+         "size": 11,
+         "color": "dim"
+        }
+       }
+      ]
+     },
+     {
+      "id": "tm39",
+      "type": "free",
+      "props": {
+       "x": 296,
+       "y": 204,
+       "w": 362,
+       "h": 216,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "tm33",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "Devices following it",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "tm38",
+        "type": "repeater",
+        "props": {
+         "x": 0,
+         "y": 36,
+         "w": 362,
+         "h": 180,
+         "source": "model",
+         "path": "$time.clients",
+         "empty": "",
+         "mode": "all",
+         "columns": 1,
+         "row_h": 34,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "tm37",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 34
+          },
+          "children": [
+           {
+            "id": "tm34",
+            "type": "dot",
+            "props": {
+             "x": 15,
+             "y": 4,
+             "w": 10,
+             "h": 10,
+             "color": "@color",
+             "radius": 5
+            }
+           },
+           {
+            "id": "tm35",
+            "type": "label",
+            "props": {
+             "x": 32,
+             "y": 0,
+             "r": 150,
+             "text": "${@label}",
+             "size": 14
+            }
+           },
+           {
+            "id": "tm36",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 1,
+             "r": 14,
+             "text": "${@text}",
+             "size": 13,
+             "color": "@tcolor",
+             "align": "right"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "details": []
+  },
+  {
+   "id": "hotspot",
+   "title": "Hotspot",
+   "color": "#ff963c",
+   "enabled": true,
+   "middle": "home",
+   "root": {
+    "id": "hs44",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420
+    },
+    "children": [
+     {
+      "id": "hs1",
+      "type": "label",
+      "props": {
+       "x": 0,
+       "y": 166,
+       "w": 658,
+       "text": "No hotspot data in HA",
+       "size": 20,
+       "color": "muted",
+       "align": "center",
+       "show_if": {
+        "ref": "$hotspot.present",
+        "op": "==",
+        "value": false
+       }
+      }
+     },
+     {
+      "id": "hs2",
+      "type": "label",
+      "props": {
+       "x": 0,
+       "y": 194,
+       "w": 658,
+       "text": "Install / start the WPSD Hotspot Monitor add-on",
+       "size": 14,
+       "color": "dim",
+       "align": "center",
+       "show_if": {
+        "ref": "$hotspot.present",
+        "op": "==",
+        "value": false
+       }
+      }
+     },
+     {
+      "id": "hs43",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 658,
+       "h": 420,
+       "show_if": {
+        "ref": "$hotspot.present",
+        "op": "==",
+        "value": true
+       }
+      },
+      "children": [
+       {
+        "id": "hs3",
+        "type": "box",
+        "props": {
+         "x": 0,
+         "y": 0,
+         "w": 658,
+         "h": 124,
+         "color": "orange",
+         "tint": 0.32,
+         "radius": 12,
+         "pulse": "$hotspot.view.on_air"
+        }
+       },
+       {
+        "id": "hs4",
+        "type": "box",
+        "props": {
+         "x": 0,
+         "y": 0,
+         "w": 658,
+         "h": 124,
+         "color": "none",
+         "border": "orange",
+         "bw": 3,
+         "radius": 12,
+         "show_if": {
+          "ref": "$hotspot.view.on_air",
+          "op": "==",
+          "value": true
+         }
+        }
+       },
+       {
+        "id": "hs5",
+        "type": "label",
+        "props": {
+         "x": 18,
+         "y": 8,
+         "w": 300,
+         "text": "${$hotspot.view.call}",
+         "size": 46,
+         "bold": true
+        }
+       },
+       {
+        "id": "hs6",
+        "type": "label",
+        "props": {
+         "x": 20,
+         "y": 64,
+         "w": 300,
+         "text": "${$hotspot.view.name}",
+         "size": 20,
+         "bold": true
+        }
+       },
+       {
+        "id": "hs7",
+        "type": "label",
+        "props": {
+         "x": 20,
+         "y": 92,
+         "w": 300,
+         "text": "${$hotspot.view.location}",
+         "size": 14,
+         "color": "sand"
+        }
+       },
+       {
+        "id": "hs8",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 10,
+         "w": 200,
+         "h": 22,
+         "r": 14,
+         "text": "${$hotspot.view.tag}",
+         "size": 12,
+         "color": "$hotspot.view.tag_color",
+         "bold": true,
+         "align": "right",
+         "chip": "$hotspot.view.tag_bg",
+         "show_if": {
+          "ref": "$hotspot.view.tag",
+          "op": "not_empty"
+         }
+        }
+       },
+       {
+        "id": "hs9",
+        "type": "label",
+        "props": {
+         "x": 340,
+         "y": 34,
+         "r": 14,
+         "text": "${$hotspot.view.tg}",
+         "size": 30,
+         "bold": true
+        }
+       },
+       {
+        "id": "hs10",
+        "type": "label",
+        "props": {
+         "x": 340,
+         "y": 70,
+         "r": 14,
+         "text": "${$hotspot.view.tg_name}",
+         "size": 15,
+         "color": "sand"
+        }
+       },
+       {
+        "id": "hs11",
+        "type": "label",
+        "props": {
+         "x": 340,
+         "y": 96,
+         "r": 14,
+         "text": "${$hotspot.view.meta}",
+         "size": 13,
+         "color": "sand"
+        }
+       },
+       {
+        "id": "hs29",
+        "type": "free",
+        "props": {
+         "x": 0,
+         "y": 132,
+         "w": 330,
+         "h": 288,
+         "bg": "card"
+        },
+        "children": [
+         {
+          "id": "hs12",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 10,
+           "text": "Talkgroups · BrandMeister",
+           "size": 15,
+           "color": "muted"
+          }
+         },
+         {
+          "id": "hs13",
+          "type": "label",
+          "props": {
+           "x": 0,
+           "y": 12,
+           "w": 80,
+           "r": 14,
+           "text": "${$hotspot.view.net}",
+           "size": 13,
+           "color": "$hotspot.view.net_color",
+           "bold": true,
+           "align": "right"
+          }
+         },
+         {
+          "id": "hs27",
+          "type": "column",
+          "props": {
+           "x": 10,
+           "y": 36,
+           "w": 310,
+           "h": 222,
+           "gap": 0
+          },
+          "children": [
+           {
+            "id": "hs14",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "h": 30,
+             "text": "${$hotspot.view.tg_empty}",
+             "size": 14,
+             "color": "dim",
+             "ml": 4,
+             "mt": 4,
+             "show_if": {
+              "ref": "$hotspot.view.tgs",
+              "op": "is_empty"
+             }
+            }
+           },
+           {
+            "id": "hs23",
+            "type": "repeater",
+            "props": {
+             "source": "model",
+             "path": "$hotspot.view.tgs",
+             "max": 4,
+             "mode": "all",
+             "columns": 1,
+             "row_h": 58,
+             "gap_y": 0,
+             "empty": ""
+            },
+            "children": [
+             {
+              "id": "hs22",
+              "type": "free",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "h": 58
+              },
+              "children": [
+               {
+                "id": "hs15",
+                "type": "box",
+                "props": {
+                 "x": 0,
+                 "y": 0,
+                 "w": 310,
+                 "h": 52,
+                 "color": "card2",
+                 "radius": 8
+                }
+               },
+               {
+                "id": "hs16",
+                "type": "box",
+                "props": {
+                 "x": 0,
+                 "y": 8,
+                 "w": 4,
+                 "h": 36,
+                 "color": "@color",
+                 "radius": 2
+                }
+               },
+               {
+                "id": "hs17",
+                "type": "label",
+                "props": {
+                 "x": 14,
+                 "y": 5,
+                 "w": 180,
+                 "text": "TG ${@tg}",
+                 "size": 17,
+                 "bold": true
+                }
+               },
+               {
+                "id": "hs18",
+                "type": "label",
+                "props": {
+                 "x": 14,
+                 "y": 26,
+                 "r": 96,
+                 "text": "${@name}",
+                 "size": 13,
+                 "color": "muted"
+                }
+               },
+               {
+                "id": "hs19",
+                "type": "label",
+                "props": {
+                 "x": 0,
+                 "y": 6,
+                 "w": 120,
+                 "r": 10,
+                 "text": "${@label}",
+                 "size": 12,
+                 "color": "@color",
+                 "bold": true,
+                 "align": "right"
+                }
+               },
+               {
+                "id": "hs20",
+                "type": "label",
+                "props": {
+                 "x": 0,
+                 "y": 26,
+                 "w": 90,
+                 "r": 10,
+                 "text": "${@left_text}",
+                 "size": 12,
+                 "color": "muted",
+                 "align": "right",
+                 "show_if": {
+                  "ref": "@expires",
+                  "op": "==",
+                  "value": true
+                 }
+                }
+               },
+               {
+                "id": "hs21",
+                "type": "bar",
+                "props": {
+                 "x": 14,
+                 "y": 46,
+                 "w": 286,
+                 "h": 3,
+                 "value": "@left",
+                 "max": 900,
+                 "color": "@color",
+                 "show_if": {
+                  "ref": "@expires",
+                  "op": "==",
+                  "value": true
+                 }
+                }
+               }
+              ]
+             }
+            ]
+           },
+           {
+            "id": "hs24",
+            "type": "kv",
+            "props": {
+             "x": 14,
+             "y": 0,
+             "h": 27,
+             "label": "Auto-static",
+             "text": "${$hotspot.view.autostatic}",
+             "size": 14,
+             "ml": 4,
+             "mr": 4,
+             "mt": 4
+            }
+           },
+           {
+            "id": "hs25",
+            "type": "kv",
+            "props": {
+             "x": 14,
+             "y": 0,
+             "label": "Master",
+             "text": "${$hotspot.view.master}",
+             "size": 14,
+             "ml": 4,
+             "mr": 4
+            }
+           },
+           {
+            "id": "hs26",
+            "type": "kv",
+            "props": {
+             "x": 14,
+             "y": 0,
+             "label": "Blocked",
+             "text": "${$hotspot.view.blocked}",
+             "size": 14,
+             "color": "warn",
+             "ml": 4,
+             "mr": 4,
+             "show_if": {
+              "ref": "$hotspot.view.blocked",
+              "op": "not_empty"
+             }
+            }
+           }
+          ]
+         },
+         {
+          "id": "hs28",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 266,
+           "r": 14,
+           "text": "${$hotspot.view.footer}",
+           "size": 12,
+           "color": "dim"
+          }
+         }
+        ]
+       },
+       {
+        "id": "hs42",
+        "type": "free",
+        "props": {
+         "x": 338,
+         "y": 132,
+         "w": 320,
+         "h": 288,
+         "bg": "card"
+        },
+        "children": [
+         {
+          "id": "hs30",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 10,
+           "text": "Last heard",
+           "size": 15,
+           "color": "muted"
+          }
+         },
+         {
+          "id": "hs31",
+          "type": "label",
+          "props": {
+           "x": 0,
+           "y": 12,
+           "w": 150,
+           "r": 14,
+           "text": "${$hotspot.view.host}",
+           "size": 12,
+           "color": "dim",
+           "align": "right"
+          }
+         },
+         {
+          "id": "hs32",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 36,
+           "text": "Nothing heard yet",
+           "size": 14,
+           "color": "dim",
+           "show_if": {
+            "ref": "$hotspot.view.heard",
+            "op": "is_empty"
+           }
+          }
+         },
+         {
+          "id": "hs41",
+          "type": "repeater",
+          "props": {
+           "x": 0,
+           "y": 33,
+           "w": 320,
+           "h": 252,
+           "source": "model",
+           "path": "$hotspot.view.heard",
+           "empty": "",
+           "max": 6,
+           "mode": "all",
+           "columns": 1,
+           "row_h": 42,
+           "gap_y": 0
+          },
+          "children": [
+           {
+            "id": "hs40",
+            "type": "free",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "h": 42
+            },
+            "children": [
+             {
+              "id": "hs33",
+              "type": "box",
+              "props": {
+               "x": 8,
+               "y": 0,
+               "w": 304,
+               "h": 40,
+               "color": "orange",
+               "tint": 0.3,
+               "radius": 7,
+               "show_if": {
+                "ref": "@tx",
+                "op": "==",
+                "value": true
+               }
+              }
+             },
+             {
+              "id": "hs36",
+              "type": "inline",
+              "props": {
+               "x": 14,
+               "y": 3,
+               "h": 20,
+               "r": 80,
+               "gap": 6
+              },
+              "children": [
+               {
+                "id": "hs34",
+                "type": "label",
+                "props": {
+                 "x": 0,
+                 "y": 0,
+                 "text": "${@call}",
+                 "size": 15,
+                 "color": "@color",
+                 "bold": true
+                }
+               },
+               {
+                "id": "hs35",
+                "type": "label",
+                "props": {
+                 "x": 0,
+                 "y": 0,
+                 "text": "${@src}",
+                 "size": 10,
+                 "color": "@src_color",
+                 "bold": "@rf",
+                 "mt": 4
+                }
+               }
+              ]
+             },
+             {
+              "id": "hs37",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 5,
+               "w": 80,
+               "r": 14,
+               "text": "${@time}",
+               "size": 11,
+               "color": "muted",
+               "align": "right"
+              }
+             },
+             {
+              "id": "hs38",
+              "type": "label",
+              "props": {
+               "x": 14,
+               "y": 21,
+               "r": 76,
+               "text": "${@tg}",
+               "size": 12,
+               "color": "muted"
+              }
+             },
+             {
+              "id": "hs39",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 21,
+               "w": 60,
+               "r": 14,
+               "text": "${@dur}",
+               "size": 12,
+               "color": "@dur_color",
+               "bold": "@tx",
+               "align": "right"
+              }
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "details": []
+  },
+  {
+   "id": "ha",
+   "title": "Home Assistant",
+   "color": "#41bdf5",
+   "enabled": true,
+   "middle": "home",
+   "root": {
+    "id": "ha40",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420
+    },
+    "children": [
+     {
+      "id": "ha17",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 300,
+       "h": 420,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "ha1",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "Home Assistant",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "ha2",
+        "type": "pill",
+        "props": {
+         "x": 14,
+         "y": 36,
+         "w": 272,
+         "h": 46,
+         "text": "${$ha.view.state}",
+         "color": "$ha.view.color"
+        }
+       },
+       {
+        "id": "ha3",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 36,
+         "h": 46,
+         "r": 26,
+         "text": "${$ha.view.latency}",
+         "size": 13,
+         "color": "muted",
+         "align": "right",
+         "valign": "middle"
+        }
+       },
+       {
+        "id": "ha4",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 94,
+         "r": 14,
+         "label": "Core",
+         "text": "${$ha.view.core}",
+         "size": 15,
+         "color": "$ha.view.core_color"
+        }
+       },
+       {
+        "id": "ha5",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 118,
+         "r": 14,
+         "label": "Supervisor",
+         "text": "${$ha.view.supervisor}",
+         "size": 15
+        }
+       },
+       {
+        "id": "ha6",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 142,
+         "r": 14,
+         "label": "OS",
+         "text": "${$ha.view.os}",
+         "size": 15
+        }
+       },
+       {
+        "id": "ha7",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 166,
+         "r": 14,
+         "label": "Entities",
+         "text": "${$ha.view.entities}",
+         "size": 15
+        }
+       },
+       {
+        "id": "ha8",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 190,
+         "r": 14,
+         "label": "Unavailable",
+         "text": "${$ha.view.unavailable}",
+         "size": 15,
+         "color": "$ha.view.unavailable_color"
+        }
+       },
+       {
+        "id": "ha9",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 214,
+         "r": 14,
+         "label": "Notifications",
+         "text": "${$ha.view.notifications}",
+         "size": 15,
+         "color": "$ha.view.notifications_color"
+        }
+       },
+       {
+        "id": "ha10",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 238,
+         "r": 14,
+         "label": "Zigbee2MQTT",
+         "text": "${$ha.view.z2m}",
+         "size": 15,
+         "color": "$ha.view.z2m_color"
+        }
+       },
+       {
+        "id": "ha11",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 268,
+         "text": "Add-ons reporting",
+         "size": 13,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "ha16",
+        "type": "repeater",
+        "props": {
+         "x": 0,
+         "y": 290,
+         "w": 300,
+         "h": 120,
+         "source": "model",
+         "path": "$ha.view.addons",
+         "empty": "",
+         "mode": "all",
+         "columns": 1,
+         "row_h": 24,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "ha15",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 24
+          },
+          "children": [
+           {
+            "id": "ha12",
+            "type": "dot",
+            "props": {
+             "x": 15,
+             "y": 3,
+             "w": 10,
+             "h": 10,
+             "color": "@color",
+             "radius": 5
+            }
+           },
+           {
+            "id": "ha13",
+            "type": "label",
+            "props": {
+             "x": 32,
+             "y": 0,
+             "r": 80,
+             "text": "${@name}",
+             "size": 14
+            }
+           },
+           {
+            "id": "ha14",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 1,
+             "w": 70,
+             "r": 14,
+             "text": "${@text}",
+             "size": 13,
+             "color": "@color",
+             "align": "right"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "ha30",
+      "type": "free",
+      "props": {
+       "x": 308,
+       "y": 0,
+       "w": 350,
+       "h": 196,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "ha18",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "Host",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "ha19",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 38,
+         "text": "CPU",
+         "size": 14,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "ha20",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 38,
+         "w": 250,
+         "r": 14,
+         "text": "${$ha.view.cpu_text}",
+         "size": 14,
+         "align": "right"
+        }
+       },
+       {
+        "id": "ha21",
+        "type": "bar",
+        "props": {
+         "x": 14,
+         "y": 60,
+         "w": 322,
+         "h": 8,
+         "value": "$ha.view.cpu",
+         "max": 100,
+         "color": "$ha.view.cpu_color"
+        }
+       },
+       {
+        "id": "ha22",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 76,
+         "text": "Memory",
+         "size": 14,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "ha23",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 76,
+         "w": 250,
+         "r": 14,
+         "text": "${$ha.view.mem_text}",
+         "size": 14,
+         "align": "right"
+        }
+       },
+       {
+        "id": "ha24",
+        "type": "bar",
+        "props": {
+         "x": 14,
+         "y": 98,
+         "w": 322,
+         "h": 8,
+         "value": "$ha.view.mem",
+         "max": 100,
+         "color": "$ha.view.mem_color"
+        }
+       },
+       {
+        "id": "ha25",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 114,
+         "text": "Disk",
+         "size": 14,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "ha26",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 114,
+         "w": 250,
+         "r": 14,
+         "text": "${$ha.view.disk_text}",
+         "size": 14,
+         "align": "right"
+        }
+       },
+       {
+        "id": "ha27",
+        "type": "bar",
+        "props": {
+         "x": 14,
+         "y": 136,
+         "w": 322,
+         "h": 8,
+         "value": "$ha.view.disk",
+         "max": 100,
+         "color": "$ha.view.disk_color"
+        }
+       },
+       {
+        "id": "ha28",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 152,
+         "text": "CPU temp",
+         "size": 14,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "ha29",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 152,
+         "w": 150,
+         "r": 14,
+         "text": "${$ha.view.cpu_temp}",
+         "size": 14,
+         "align": "right"
+        }
+       }
+      ]
+     },
+     {
+      "id": "ha39",
+      "type": "free",
+      "props": {
+       "x": 308,
+       "y": 204,
+       "w": 350,
+       "h": 216,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "ha31",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "Backups & updates",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "ha32",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 36,
+         "r": 14,
+         "label": "Last backup",
+         "text": "${$ha.view.backup_last}",
+         "size": 15,
+         "color": "$ha.view.backup_color"
+        }
+       },
+       {
+        "id": "ha33",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 60,
+         "r": 14,
+         "label": "Next backup",
+         "text": "${$ha.view.backup_next}",
+         "size": 15
+        }
+       },
+       {
+        "id": "ha34",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 88,
+         "text": "${$ha.view.updates_title}",
+         "size": 14,
+         "color": "warn",
+         "bold": true,
+         "show_if": {
+          "ref": "$ha.view.updates_title",
+          "op": "not_empty"
+         }
+        }
+       },
+       {
+        "id": "ha36",
+        "type": "repeater",
+        "props": {
+         "x": 14,
+         "y": 110,
+         "w": 322,
+         "h": 60,
+         "source": "model",
+         "path": "$ha.view.updates",
+         "empty": "",
+         "max": 3,
+         "mode": "all",
+         "columns": 1,
+         "row_h": 20,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "ha35",
+          "type": "label",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 20,
+           "text": "• ${@name}",
+           "size": 13
+          }
+         }
+        ]
+       },
+       {
+        "id": "ha37",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 170,
+         "text": "${$ha.view.updates_more}",
+         "size": 12,
+         "color": "muted",
+         "show_if": {
+          "ref": "$ha.view.updates_more",
+          "op": "not_empty"
+         }
+        }
+       },
+       {
+        "id": "ha38",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 88,
+         "text": "${$ha.view.all_ok}",
+         "size": 14,
+         "color": "ok",
+         "show_if": {
+          "ref": "$ha.view.updates_title",
+          "op": "is_empty"
+         }
+        }
+       }
+      ]
+     }
+    ]
+   },
+   "details": []
+  },
+  {
+   "id": "cooling",
+   "title": "Cooling",
+   "color": "#96c8ff",
+   "enabled": true,
+   "middle": "details",
+   "root": {
+    "id": "cl42",
+    "type": "free",
+    "props": {
+     "x": 0,
+     "y": 0,
+     "w": 658,
+     "h": 420
+    },
+    "children": [
+     {
+      "id": "cl34",
+      "type": "repeater",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 658,
+       "h": 262,
+       "source": "model",
+       "path": "$fanctl",
+       "empty": "",
+       "mode": "all"
+      },
+      "children": [
+       {
+        "id": "cl33",
+        "type": "free",
+        "props": {
+         "x": 0,
+         "y": 0,
+         "h": 262,
+         "bg": "card"
+        },
+        "children": [
+         {
+          "id": "cl24",
+          "type": "dot",
+          "props": {
+           "x": 12,
+           "y": 14,
+           "w": 12,
+           "h": 12,
+           "color": "@color",
+           "radius": 6
+          }
+         },
+         {
+          "id": "cl25",
+          "type": "label",
+          "props": {
+           "x": 32,
+           "y": 10,
+           "w": 150,
+           "text": "${@name} ›",
+           "size": 16,
+           "bold": true,
+           "link": "fan-detail"
+          }
+         },
+         {
+          "id": "cl26",
+          "type": "label",
+          "props": {
+           "x": 0,
+           "y": 12,
+           "w": 120,
+           "r": 14,
+           "text": "${@esp_text}",
+           "size": 13,
+           "color": "@esp_color",
+           "align": "right"
+          }
+         },
+         {
+          "id": "cl27",
+          "type": "repeater",
+          "props": {
+           "x": 14,
+           "y": 40,
+           "h": 160,
+           "r": 14,
+           "source": "model",
+           "path": "@fans",
+           "empty": "",
+           "mode": "all",
+           "columns": 1,
+           "row_h": 30,
+           "gap_y": 0
+          },
+          "children": [
+           {
+            "id": "cl7",
+            "type": "free",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "h": 30
+            },
+            "children": [
+             {
+              "id": "cl1",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "w": 60,
+               "text": "Fan ${@n}",
+               "size": 14,
+               "color": "@label_color"
+              }
+             },
+             {
+              "id": "cl2",
+              "type": "bar",
+              "props": {
+               "x": 56,
+               "y": 6,
+               "h": 7,
+               "r": 116,
+               "value": "@frac",
+               "max": 1,
+               "color": "@color",
+               "show_if": {
+                "ref": "@fit",
+                "op": "==",
+                "value": true
+               }
+              }
+             },
+             {
+              "id": "cl3",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "w": 110,
+               "r": 40,
+               "text": "${@rpm|d:0} rpm",
+               "size": 14,
+               "align": "right",
+               "show_if": {
+                "ref": "@live",
+                "op": "==",
+                "value": true
+               }
+              }
+             },
+             {
+              "id": "cl4",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 1,
+               "w": 40,
+               "r": 0,
+               "text": "${@pwm|d:0|u:%}",
+               "size": 13,
+               "color": "muted",
+               "align": "right",
+               "show_if": {
+                "ref": "@live",
+                "op": "==",
+                "value": true
+               }
+              }
+             },
+             {
+              "id": "cl5",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "w": 40,
+               "r": 0,
+               "text": "off",
+               "size": 14,
+               "color": "muted",
+               "bold": true,
+               "align": "right",
+               "show_if": {
+                "ref": "@off_shown",
+                "op": "==",
+                "value": true
+               }
+              }
+             },
+             {
+              "id": "cl6",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "w": 40,
+               "r": 0,
+               "text": "—",
+               "size": 14,
+               "color": "dim",
+               "align": "right",
+               "show_if": {
+                "ref": "@fit",
+                "op": "==",
+                "value": false
+               }
+              }
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "id": "cl28",
+          "type": "box",
+          "props": {
+           "x": 12,
+           "y": 210,
+           "h": 40,
+           "r": 12,
+           "color": "card2",
+           "show_if": {
+            "ref": "@ctl_mode",
+            "op": "==",
+            "value": "offline"
+           }
+          }
+         },
+         {
+          "id": "cl29",
+          "type": "box",
+          "props": {
+           "x": 12,
+           "y": 210,
+           "h": 40,
+           "r": 12,
+           "color": "card2",
+           "show_if": {
+            "ref": "@ctl_mode",
+            "op": "==",
+            "value": "none"
+           }
+          }
+         },
+         {
+          "id": "cl30",
+          "type": "label",
+          "props": {
+           "x": 12,
+           "y": 210,
+           "h": 40,
+           "r": 12,
+           "text": "${@ctl_text}",
+           "size": 14,
+           "color": "dim",
+           "align": "center",
+           "valign": "middle",
+           "show_if": {
+            "ref": "@ctl",
+            "op": "is_empty"
+           }
+          }
+         },
+         {
+          "id": "cl31",
+          "type": "button",
+          "props": {
+           "x": 12,
+           "y": 210,
+           "h": 40,
+           "r": 12,
+           "exact": true,
+           "size": 15,
+           "label": "ALL FANS ON  ·  ${@running}/${@fitted_n} running",
+           "color": "ok",
+           "filled": true,
+           "service": "fan.turn_off",
+           "target": "@ctl",
+           "confirm": "confirm",
+           "confirm_title": "Turn off all {item} fans?",
+           "confirm_text": "The fans stop cooling the rack until\nyou turn them back on.",
+           "danger": true,
+           "show_if": {
+            "ref": "@ctl_mode",
+            "op": "==",
+            "value": "on"
+           }
+          }
+         },
+         {
+          "id": "cl32",
+          "type": "button",
+          "props": {
+           "x": 12,
+           "y": 210,
+           "h": 40,
+           "r": 12,
+           "exact": true,
+           "size": 15,
+           "label": "ALL FANS OFF  ·  ${@running}/${@fitted_n} running",
+           "color": "muted",
+           "filled": false,
+           "service": "fan.turn_on",
+           "target": "@ctl",
+           "show_if": {
+            "ref": "@ctl_mode",
+            "op": "==",
+            "value": "off"
+           }
+          }
+         }
+        ]
+       }
+      ]
+     },
+     {
+      "id": "cl41",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 270,
+       "w": 658,
+       "h": 150,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "cl35",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 10,
+         "text": "Equipment temperatures",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "cl40",
+        "type": "repeater",
+        "props": {
+         "x": 14,
+         "y": 36,
+         "w": 630,
+         "h": 104,
+         "source": "model",
+         "path": "$equip_temps",
+         "empty": "",
+         "max": 8,
+         "mode": "all",
+         "columns": 2,
+         "row_h": 26,
+         "gap_x": 20,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "cl39",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 26
+          },
+          "children": [
+           {
+            "id": "cl36",
+            "type": "dot",
+            "props": {
+             "x": 1,
+             "y": 4,
+             "w": 10,
+             "h": 10,
+             "color": "@color",
+             "radius": 5
+            }
+           },
+           {
+            "id": "cl37",
+            "type": "label",
+            "props": {
+             "x": 18,
+             "y": 0,
+             "r": 90,
+             "text": "${@name}",
+             "size": 14
+            }
+           },
+           {
+            "id": "cl38",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "text": "${@value|d:1|u:@unit}",
+             "size": 14,
+             "align": "right"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "details": [
+    {
+     "id": "fan-detail",
+     "title": "",
+     "root": {
+      "id": "cl23",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 658,
+       "h": 420,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "cl8",
+        "type": "button",
+        "props": {
+         "x": 12,
+         "y": 10,
+         "w": 90,
+         "h": 32,
+         "label": "‹ Back",
+         "action": "back",
+         "color": "muted",
+         "size": 14,
+         "exact": true
+        }
+       },
+       {
+        "id": "cl9",
+        "type": "dot",
+        "props": {
+         "x": 116,
+         "y": 20,
+         "w": 12,
+         "h": 12,
+         "color": "@color",
+         "radius": 6
+        }
+       },
+       {
+        "id": "cl10",
+        "type": "label",
+        "props": {
+         "x": 136,
+         "y": 14,
+         "w": 300,
+         "text": "${@name}",
+         "size": 18,
+         "bold": true
+        }
+       },
+       {
+        "id": "cl11",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 16,
+         "w": 150,
+         "r": 14,
+         "text": "${@esp_text}",
+         "size": 14,
+         "color": "@esp_color",
+         "align": "right"
+        }
+       },
+       {
+        "id": "cl22",
+        "type": "repeater",
+        "props": {
+         "x": 10,
+         "y": 60,
+         "w": 638,
+         "h": 360,
+         "source": "model",
+         "path": "@fans",
+         "empty": "",
+         "mode": "all",
+         "columns": 1,
+         "row_h": 72,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "cl21",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 72
+          },
+          "children": [
+           {
+            "id": "cl12",
+            "type": "box",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "w": 638,
+             "h": 64,
+             "color": "@row_color",
+             "radius": 10
+            }
+           },
+           {
+            "id": "cl13",
+            "type": "label",
+            "props": {
+             "x": 16,
+             "y": 10,
+             "w": 100,
+             "text": "Fan ${@n}",
+             "size": 18,
+             "color": "@label_color",
+             "bold": true
+            }
+           },
+           {
+            "id": "cl14",
+            "type": "label",
+            "props": {
+             "x": 16,
+             "y": 36,
+             "w": 200,
+             "text": "${@nc_text}",
+             "size": 14,
+             "color": "dim",
+             "show_if": {
+              "ref": "@fit",
+              "op": "==",
+              "value": false
+             }
+            }
+           },
+           {
+            "id": "cl15",
+            "type": "label",
+            "props": {
+             "x": 16,
+             "y": 38,
+             "w": 100,
+             "text": "${@state_text}",
+             "size": 13,
+             "color": "@state_color",
+             "bold": true,
+             "show_if": {
+              "ref": "@fit",
+              "op": "==",
+              "value": true
+             }
+            }
+           },
+           {
+            "id": "cl16",
+            "type": "bar",
+            "props": {
+             "x": 120,
+             "y": 18,
+             "h": 9,
+             "r": 210,
+             "value": "@frac_on",
+             "max": 1,
+             "color": "@color",
+             "show_if": {
+              "ref": "@fit",
+              "op": "==",
+              "value": true
+             }
+            }
+           },
+           {
+            "id": "cl17",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 10,
+             "w": 110,
+             "r": 110,
+             "text": "${@rpm_text}",
+             "size": 17,
+             "color": "@rpm_color",
+             "bold": true,
+             "align": "right",
+             "show_if": {
+              "ref": "@fit",
+              "op": "==",
+              "value": true
+             }
+            }
+           },
+           {
+            "id": "cl18",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 36,
+             "w": 110,
+             "r": 110,
+             "text": "PWM ${@pwm|d:0|u:%}",
+             "size": 13,
+             "color": "muted",
+             "align": "right",
+             "show_if": {
+              "ref": "@on",
+              "op": "==",
+              "value": true
+             }
+            }
+           },
+           {
+            "id": "cl19",
+            "type": "button",
+            "props": {
+             "y": 12,
+             "w": 84,
+             "h": 40,
+             "r": 12,
+             "label": "ON",
+             "color": "ok",
+             "filled": true,
+             "size": 16,
+             "exact": true,
+             "service": "fan.turn_off",
+             "target": "@entity",
+             "confirm": "confirm",
+             "confirm_title": "Turn off {item}?",
+             "confirm_text": "The fan stops cooling the rack until\nyou turn it back on.",
+             "danger": true,
+             "show_if": {
+              "ref": "@toggle_on",
+              "op": "==",
+              "value": true
+             }
+            }
+           },
+           {
+            "id": "cl20",
+            "type": "button",
+            "props": {
+             "y": 12,
+             "w": 84,
+             "h": 40,
+             "r": 12,
+             "label": "OFF",
+             "color": "muted",
+             "size": 16,
+             "exact": true,
+             "service": "fan.turn_on",
+             "target": "@entity",
+             "show_if": {
+              "ref": "@toggle_off",
+              "op": "==",
+              "value": true
+             }
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "lights",
+   "title": "Lights",
+   "color": "#ffffff",
+   "enabled": true,
+   "middle": "wled_power",
+   "root": {
+    "id": "lt10",
+    "type": "tabs",
+    "props": {
+     "bar_h": 38,
+     "tab_w": 160,
+     "tab_h": 30
+    },
+    "children": [
+     {
+      "id": "lt2",
+      "type": "tab",
+      "props": {
+       "title": "Rack LEDs"
+      },
+      "children": [
+       {
+        "id": "lt1",
+        "type": "wled_panel",
+        "props": {
+         "grow": true
+        }
+       }
+      ]
+     },
+     {
+      "id": "lt9",
+      "type": "tab",
+      "props": {
+       "title": "Switch & AP lights"
+      },
+      "children": [
+       {
+        "id": "lt8",
+        "type": "free",
+        "props": {
+         "x": 0,
+         "y": 0,
+         "w": 658,
+         "h": 382,
+         "bg": "card"
+        },
+        "children": [
+         {
+          "id": "lt7",
+          "type": "repeater",
+          "props": {
+           "x": 0,
+           "y": 20,
+           "w": 658,
+           "h": 350,
+           "source": "model",
+           "path": "$lights.list",
+           "empty": "",
+           "mode": "all",
+           "columns": 1,
+           "row_h": 70,
+           "gap_y": 0
+          },
+          "children": [
+           {
+            "id": "lt6",
+            "type": "free",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "h": 70
+            },
+            "children": [
+             {
+              "id": "lt3",
+              "type": "label",
+              "props": {
+               "x": 16,
+               "y": 6,
+               "w": 150,
+               "text": "${@name}",
+               "size": 17,
+               "color": "@name_color",
+               "bold": true
+              }
+             },
+             {
+              "id": "lt4",
+              "type": "slider",
+              "props": {
+               "x": 170,
+               "y": 0,
+               "h": 36,
+               "r": 148,
+               "entity": "@id",
+               "attr": "brightness",
+               "bare": true,
+               "show_if": {
+                "ref": "@dimmable",
+                "op": "==",
+                "value": true
+               }
+              }
+             },
+             {
+              "id": "lt5",
+              "type": "toggle",
+              "props": {
+               "y": 0,
+               "w": 84,
+               "h": 36,
+               "r": 16,
+               "entity": "@id",
+               "size": 14
+              }
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   "details": []
+  }
+ ]
+}

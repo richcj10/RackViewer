@@ -1,0 +1,915 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RackView Builder</title>
+<style>
+/* Three-pane workbench: structure tree | exact device preview (rendered by the Pi) | inspector. */
+:root {
+  --bg: #eef1f4; --panel: #ffffff; --panel-2: #f5f7f9; --line: #d6dce3; --fg: #17202a; --muted: #5d6b7a;
+  --accent: #0b7a83; --accent-soft: #d5eff0; --danger: #b4232a; --ok: #1a7f37; --warn: #9a6700;
+  --font-ui: "Segoe UI", system-ui, -apple-system, sans-serif; --font-mono: ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0f1418; --panel: #161d23; --panel-2: #1b242b; --line: #2b3640; --fg: #e3e9ef; --muted: #93a2b0;
+    --accent: #3cc6cf; --accent-soft: #123a3e; --danger: #ff7b72; --ok: #3fb950; --warn: #d29922; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }   /* tabs swap whole views; layout classes must not override this */
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px var(--font-ui); }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.top { display: flex; align-items: center; gap: 10px; padding: 9px 16px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.brand b { font-size: 16px; } .brand span { color: var(--muted); font-size: 12px; margin-left: 8px; }
+.navtabs { display: flex; gap: 4px; }
+.navtabs button { border: 0; background: transparent; padding: 7px 12px; border-radius: 7px; color: var(--muted); font-weight: 600; }
+.navtabs button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+.spacer { flex: 1; }
+.status { color: var(--muted); font-size: 12px; display: flex; gap: 6px; align-items: center; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.dot.ok { background: #3fb950; } .dot.bad { background: #f85149; }
+.btn { border: 1px solid var(--line); background: var(--panel); padding: 6px 11px; border-radius: 8px; font-weight: 600; }
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+a.btn { color: inherit; text-decoration: none; display: inline-block; }
+.btn.small { padding: 3px 8px; font-size: 12px; border-radius: 6px; }
+.btn.danger { color: var(--danger); }
+.btn:disabled { opacity: .45; cursor: default; }
+.dirty { color: var(--warn); font-size: 12px; font-weight: 600; }
+.bench { display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; gap: 12px; padding: 12px 16px; height: calc(100% - 54px); }
+.pane { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.pane h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; padding: 11px 13px 7px; display: flex; gap: 8px; align-items: center; }
+.pane h2 .grow { flex: 1; }
+.scroll { overflow: auto; min-height: 0; flex: 1; padding: 0 8px 10px; }
+@media (max-width: 1150px) { .bench { grid-template-columns: 1fr; height: auto; } .scroll { max-height: 60vh; } }
+.tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+.tree ul { padding-left: 15px; margin-left: 10px; border-left: 1px dashed var(--line); }
+.row { display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 6px; cursor: pointer; user-select: none; position: relative; }
+.row:hover { background: var(--panel-2); }
+.row.sel { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.row .ic { width: 18px; text-align: center; color: var(--muted); flex: none; }
+.row .lbl { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .kind { font-size: 11px; color: var(--muted); }
+.row .tag { font-size: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; color: var(--muted); }
+.row.screen { font-weight: 700; } .row.off .lbl { color: var(--muted); text-decoration: line-through; }
+.row.drop-before::before, .row.drop-after::after { content: ""; position: absolute; left: 4px; right: 4px; height: 2px; background: var(--accent); }
+.row.drop-before::before { top: -1px; } .row.drop-after::after { bottom: -1px; }
+.row.drop-inside { box-shadow: inset 0 0 0 2px var(--accent); }
+.swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.addbar { display: flex; gap: 6px; padding: 5px 8px; flex-wrap: wrap; }
+.palette { border-top: 1px solid var(--line); padding: 8px; max-height: 44%; overflow: auto; }
+.palette h3 { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin: 8px 4px 6px; }
+.pal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pal { border: 1px solid var(--line); background: var(--panel-2); border-radius: 7px; padding: 6px 8px; text-align: left; display: flex; gap: 7px; }
+.pal:hover { border-color: var(--accent); }
+.pal b { display: block; font-size: 12.5px; } .pal small { display: block; color: var(--muted); font-size: 11px; line-height: 1.25; }
+.pal .ic { width: 16px; color: var(--accent); }
+.stage { flex: 1; display: flex; flex-direction: column; gap: 8px; padding: 0 14px 14px; min-height: 0; }
+.crumbs { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 13px; min-height: 24px; }
+.crumbs button { border: 0; background: none; color: var(--accent); font-weight: 600; padding: 2px 4px; }
+.crumbs select { font-size: 12px; padding: 2px 4px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel-2); }
+.frame-wrap { flex: 1; display: flex; justify-content: center; align-items: flex-start; min-height: 0; }
+.frame { position: relative; width: 800px; height: 480px; transform-origin: top left; box-shadow: 0 0 0 10px #1b1f24, 0 12px 30px rgba(0,0,0,.35); border-radius: 4px; background: #0d1117; }
+.frame img { display: block; width: 800px; height: 480px; }
+.frame .hot { position: absolute; border: 1px solid transparent; cursor: pointer; }
+.frame .hot:hover { border-color: rgba(88,166,255,.7); }
+.frame .hot.sel { border: 2px solid #3cc6cf; box-shadow: 0 0 0 9999px rgba(0,0,0,0); }
+.frame .msg { position: absolute; inset: 0; display: grid; place-items: center; color: #8b949e; font-size: 15px; text-align: center; padding: 30px; }
+.frame-box { position: relative; }
+.legend { color: var(--muted); font-size: 12px; }
+.insp { padding: 0 13px 13px; display: flex; flex-direction: column; gap: 11px; }
+.what { display: flex; gap: 10px; align-items: center; }
+.what .ic { width: 32px; height: 32px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-size: 16px; flex: none; }
+.what b { display: block; font-size: 15px; } .what small { color: var(--muted); font-size: 12px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field > label, .flabel { font-size: 12px; font-weight: 600; color: var(--muted); }
+.hint { font-size: 11.5px; color: var(--muted); }
+.field input[type=text], .field input[type=number], .field select, .field textarea, .mini { border: 1px solid var(--line); background: var(--panel-2); border-radius: 7px; padding: 6px 8px; width: 100%; }
+.field textarea { font-family: var(--font-mono); font-size: 12px; min-height: 58px; }
+.mono { font-family: var(--font-mono); font-size: 12px; }
+.check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { flex: 1; border: 0; background: var(--panel-2); padding: 5px 4px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.picker { position: relative; }
+.menu { position: absolute; z-index: 30; top: 100%; left: 0; right: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin-top: 4px; max-height: 260px; overflow: auto; box-shadow: 0 8px 24px rgba(0,0,0,.2); }
+.menu div { padding: 5px 9px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
+.menu div:hover { background: var(--accent-soft); }
+.menu small { color: var(--muted); } .menu .eid { font-family: var(--font-mono); font-size: 11.5px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px 2px 7px; font-family: var(--font-mono); font-size: 11px; display: inline-flex; gap: 3px; align-items: center; }
+.chip button { border: 0; background: none; color: var(--muted); padding: 0 3px; }
+.chip.add { cursor: pointer; font-family: var(--font-ui); }
+.result { font-family: var(--font-mono); font-size: 11.5px; padding: 4px 7px; border-radius: 6px; background: var(--panel-2); }
+.result.err { color: var(--danger); }
+.rules { display: flex; flex-direction: column; gap: 5px; }
+.rule { display: grid; grid-template-columns: 76px 1fr 84px 26px; gap: 4px; }
+.rule select, .rule input { border: 1px solid var(--line); background: var(--panel-2); border-radius: 6px; padding: 4px 5px; font-size: 12px; min-width: 0; }
+.sep { border: 0; border-top: 1px solid var(--line); margin: 2px 0; }
+.helpbox { background: var(--panel-2); border-radius: 8px; padding: 9px 11px; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.helpbox b { color: var(--fg); }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+details.adv summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); }
+details.adv[open] summary { margin-bottom: 8px; }
+.page { max-width: 1000px; margin: 0 auto; padding: 16px; }
+.page h1 { font-size: 20px; margin: 4px 0; } .page p.lead { color: var(--muted); margin: 0 0 14px; max-width: 72ch; }
+.tblwrap { overflow-x: auto; }
+.tbl { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); }
+.tbl th, .tbl td { padding: 7px 9px; border-bottom: 1px solid var(--line); text-align: left; font-size: 13px; }
+.tbl th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; background: var(--panel-2); }
+.tbl input, .tbl select { border: 1px solid var(--line); background: var(--panel-2); border-radius: 6px; padding: 5px 7px; width: 100%; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.box { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.box h3 { margin: 0; font-size: 14px; }
+.colorrow { display: flex; gap: 6px; align-items: center; } .colorrow .swatch { width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line); flex: none; }
+.mlist { max-height: 55vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; }
+.mrow { display: flex; justify-content: space-between; gap: 10px; padding: 5px 9px; border-top: 1px solid var(--line); cursor: pointer; font-size: 12.5px; }
+.mrow:first-child { border-top: 0; } .mrow:hover { background: var(--accent-soft); } .mrow small { color: var(--muted); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+textarea.bad, input.bad { border-color: var(--danger) !important; }
+.bkstate { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; } .bkstate .dot { margin-top: 5px; flex: none; }
+.keybox { font: 11.5px ui-monospace, monospace; word-break: break-all; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; user-select: all; }
+.vlist { display: flex; flex-direction: column; max-height: 300px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.vlist .v { display: flex; gap: 8px; align-items: center; padding: 6px 9px; border-top: 1px solid var(--line); font-size: 13px; } .vlist .v:first-child { border-top: 0; }
+.vlist .v .when { flex: 1; min-width: 0; } .vlist .v .when small { color: var(--muted); display: block; }
+.btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 50; padding: 16px; }
+.modal .card { background: var(--panel); border-radius: 12px; padding: 18px; width: min(560px, 100%); max-height: 85vh; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+.modal pre { background: var(--panel-2); border-radius: 8px; padding: 12px; overflow: auto; font-family: var(--font-mono); font-size: 12px; margin: 0; max-height: 60vh; }
+.toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 9px 16px; border-radius: 20px; font-weight: 600; z-index: 60; }
+.banner { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 24px; margin: 40px auto; max-width: 560px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><b>RackView Builder</b><span>800×480 · RackViewer</span></div>
+  <nav class="navtabs" role="tablist">
+    <button role="tab" data-tab="screens" aria-selected="true">Screens</button>
+    <button role="tab" data-tab="alerts" aria-selected="false">Alerts</button>
+    <button role="tab" data-tab="settings" aria-selected="false">Settings</button>
+  </nav>
+  <span class="spacer"></span>
+  <span class="dirty" id="dirty" hidden>Unsaved changes</span>
+  <span class="status"><span class="dot" id="hadot"></span><span id="hatext">Connecting…</span></span>
+  <button class="btn small" id="undo">Undo</button>
+  <button class="btn small" id="redo">Redo</button>
+  <button class="btn" id="showjson">JSON</button>
+  <button class="btn" id="showdev">Show on device</button>
+  <button class="btn primary" id="save">Save</button>
+  <a class="btn small" href="/logout">Log out</a>
+</header>
+
+<main id="view-screens" class="bench">
+  <section class="pane" aria-label="Structure">
+    <h2><span class="grow">Screens</span><button class="btn small" id="addscreen">+ Screen</button></h2>
+    <div class="scroll"><ul class="tree" id="tree"></ul></div>
+    <div class="palette" id="palette"></div>
+  </section>
+  <section class="pane" aria-label="Preview">
+    <h2><span class="grow">Preview · rendered by the display</span><span class="legend" id="pvstate"></span></h2>
+    <div class="stage">
+      <div class="crumbs" id="crumbs"></div>
+      <div class="frame-wrap" id="framewrap"><div class="frame-box" id="framebox"><div class="frame" id="frame"><div class="msg">Loading…</div></div></div></div>
+    </div>
+  </section>
+  <section class="pane" aria-label="Properties">
+    <h2><span class="grow">Properties</span></h2>
+    <div class="scroll"><div class="insp" id="insp"></div></div>
+  </section>
+</main>
+<main id="view-alerts" class="page" hidden></main>
+<main id="view-settings" class="page" hidden></main>
+<div id="modal-root"></div>
+
+<script>
+"use strict";
+/* ============================================================ API */
+async function api(path, opts) {
+  const r = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" }, credentials: "same-origin" }, opts || {}));
+  if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
+  const ct = r.headers.get("content-type") || "";
+  const body = ct.includes("json") ? await r.json() : await r.text();
+  if (!r.ok) throw new Error((body && body.error) || ("HTTP " + r.status));
+  return body;
+}
+let ENTS = [], ENT = {}, SOURCES = {};
+
+/* ============================================================ widget registry (mirrors engine.py) */
+const F = (key, label, type, extra) => Object.assign({ key, label, type }, extra || {});
+const COLORS = [["ok", "Green"], ["warn", "Amber"], ["crit", "Red"], ["info", "Blue"], ["dim", "Grey"], ["text", "White"], ["orange", "Orange"], ["teal", "Teal"], ["purple", "Purple"]];
+const SIZE = F("grow", "Fill remaining height", "bool");
+const GAP = F("gap", "Gap between items (px)", "number", { hint: "Empty = 8" });
+const VALTXT = "Text and values: ${$ups.batt|u:%} shows a value from RackView's data, ${@name} a field of the current item, ${sensor.x|d:1} an entity. Filters: d:2 decimals · u: W unit · or:— when missing · map:on=ON;off=OFF;*=? · x:1000 · upper · age · time:%H:%M";
+const TYPES = {
+  free: { label: "Free layout", ic: "⊞", cat: "Layout", container: true, desc: "Place items at exact x / y positions (px)",
+    fields: [F("bg", "Background", "color", { hint: "card = a panel; blank = none" }), F("tint", "Background strength (0–1)", "number"), F("border", "Border colour", "color"), F("radius", "Corner radius (px)", "number"), SIZE] },
+  column: { label: "Column", ic: "⬍", cat: "Layout", container: true, desc: "Stack items top to bottom", fields: [GAP, SIZE] },
+  row: { label: "Row", ic: "⬌", cat: "Layout", container: true, desc: "Items side by side", fields: [GAP, SIZE] },
+  inline: { label: "Inline", ic: "⇥", cat: "Layout", container: true, desc: "Items side by side at their natural width", fields: [GAP] },
+  card: { label: "Card", ic: "▢", cat: "Layout", container: true, desc: "Titled panel; can open a detail screen",
+    fields: [F("title", "Title", "text"), F("link", "Opens detail screen", "detail", { hint: "Shows “Details ›” on the card. Inside a Repeater, the detail opens for that item." }),
+      F("bg", "Tint", "color"), SIZE] },
+  tabs: { label: "Tabs", ic: "⧉", cat: "Layout", container: true, accepts: ["tab"], desc: "Switchable tabs",
+    fields: [F("tab_w", "Tab width (px)", "number", { hint: "Empty = fit the label" }), F("tab_h", "Tab height (px)", "number"), F("bar_h", "Space for the tab bar (px)", "number"), SIZE] },
+  tab: { label: "Tab", ic: "▭", cat: "Layout", container: true, hidden: true, desc: "One tab", fields: [F("title", "Tab label", "text")] },
+  repeater: { label: "Repeater", ic: "⟳", cat: "Nesting", container: true, desc: "Same layout for each server, fan, list row…",
+    fields: [F("source", "Repeat for each", "source"), F("mode", "Show", "seg", { options: [["one", "One at a time"], ["all", "All"]] }),
+      F("header", "Show “name 1/3” next to the screen title", "bool", { showIf: n => n.props.mode !== "all" }),
+      F("columns", "Columns", "number", { showIf: n => n.props.mode === "all", hint: "Empty = all in one row" }),
+      F("row_h", "Row height (px)", "number", { showIf: n => n.props.mode === "all", hint: "Fixed rows, e.g. a list of temperatures. Empty = rows share the space." }),
+      F("max", "At most (items)", "text", { showIf: n => n.props.mode === "all", hint: "A number, or a ref like @temps_max" }),
+      F("flow", "Fill order", "seg", { showIf: n => n.props.mode === "all" && n.props.row_h, options: [["row", "Across"], ["col", "Down columns"]] }),
+      F("gap_x", "Column gap (px)", "number", { showIf: n => n.props.mode === "all" }), F("gap_y", "Row gap (px)", "number", { showIf: n => n.props.mode === "all" }),
+      F("cell_w", "Cell width (px)", "number", { showIf: n => n.props.mode === "all" && n.props.row_h }),
+      F("align", "Align cells", "seg", { showIf: n => n.props.cell_w, options: [["left", "Left"], ["right", "Right"]] }),
+      F("fit_rows", "Shrink rows to fit", "bool", { showIf: n => n.props.row_h }),
+      F("stretch", "Stretch rows to fill", "bool", { showIf: n => n.props.mode === "all" && !n.props.row_h, def: true }), F("empty", "Text when empty", "text"), SIZE] },
+  listdetail: { label: "List → Detail", ic: "☰", cat: "Nesting", container: true, accepts: ["slot"], desc: "Pick from a list, see its detail",
+    fields: [F("source", "List items from", "source"), F("list_w", "List width (px)", "number"), F("empty", "Text when empty", "text")] },
+  slot: { label: "Slot", ic: "▤", cat: "Nesting", container: true, hidden: true, desc: "Part of a List → Detail", fields: [] },
+  label: { label: "Label", ic: "A", cat: "Data", desc: "Text and values at a size, colour and alignment",
+    fields: [F("text", "Text", "text", { hint: VALTXT, valueText: true }), F("size", "Font size (px)", "number", { def: 15 }), F("bold", "Bold", "bool"), F("color", "Colour", "color"),
+      F("align", "Align", "seg", { options: [["left", "Left"], ["center", "Centre"], ["right", "Right"]] }), F("valign", "Vertical", "seg", { options: [["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]] }),
+      F("wrap", "Wrap onto lines (max)", "number", { hint: "Empty = one line, cut with …" }), F("chip", "Chip behind the text", "color"), F("upper", "UPPERCASE", "bool")] },
+  kv: { label: "Name · value row", ic: "≔", cat: "Data", desc: "Muted name on the left, value on the right",
+    fields: [F("label", "Name", "text"), F("text", "Value text", "text", { hint: VALTXT, valueText: true }), F("size", "Font size (px)", "number", { def: 16 }), F("color", "Value colour", "color")] },
+  bar: { label: "Bar", ic: "▬", cat: "Data", desc: "Filled bar for a value between min and max",
+    fields: [F("value", "Value", "ref"), F("min", "Min (number or ref)", "text"), F("max", "Max (number or ref)", "text"), F("color", "Colour", "color"), F("track", "Track colour", "color")] },
+  dot: { label: "Dot", ic: "●", cat: "Data", desc: "Status dot", fields: [F("color", "Colour", "color"), F("radius", "Radius (px)", "number")] },
+  box: { label: "Box", ic: "■", cat: "Data", desc: "Coloured rectangle behind other items",
+    fields: [F("color", "Fill colour", "color"), F("tint", "Fill strength (0–1)", "number"), F("border", "Border colour", "color"), F("bw", "Border width", "number"), F("radius", "Corner radius", "number"), F("pulse", "Pulse while true", "ref")] },
+  graph: { label: "List graph", ic: "⌇", cat: "Data", desc: "Line graph of a list in RackView's data",
+    fields: [F("source", "List", "ref"), F("field", "Field (index or name)", "text"), F("scale", "Multiply by", "number"), F("symmetric", "Centre on zero", "bool"), F("min_span", "Minimum scale", "number"), F("caption", "Scale unit (shows “scale ±x unit”)", "text"), F("color", "Line colour", "color")] },
+  tile: { label: "Tile", ic: "▮", cat: "Data", desc: "Big value, label, subtitle, coloured stripe",
+    fields: [F("value", "Value text", "text", { hint: "Leave empty to use the Value ref below. " + VALTXT, valueText: true }), F("entity", "Value", "ref"), F("label", "Label", "text"), F("sub", "Subtitle", "text"), F("stripe", "Stripe colour", "color"), F("warn", "Amber when", "rule"), F("crit", "Red when", "rule"), F("unit", "Unit override", "text"), F("decimals", "Decimals", "number")] },
+  big: { label: "Big number", ic: "𝟗", cat: "Data", desc: "Large value with optional label", fields: [F("entity", "Value", "ref"), F("label", "Label", "text"), F("unit", "Unit override", "text"), F("decimals", "Decimals", "number"), F("colors", "Colour rules", "colors")] },
+  value: { label: "Label · value", ic: "≔", cat: "Data", desc: "One line: name and value", fields: [F("entity", "Value", "ref"), F("label", "Label", "text"), F("unit", "Unit override", "text"), F("decimals", "Decimals", "number"), F("format", "Format", "seg", { options: [["", "Auto"], ["duration", "m:ss"]] }), F("colors", "Colour rules", "colors")] },
+  gauge: { label: "Bar", ic: "▬", cat: "Data", desc: "Value with a bar; countdowns too",
+    fields: [F("entity", "Value", "ref"), F("label", "Label", "text"), F("min", "Min (number or ref)", "text"), F("max", "Max (number or ref)", "text"), F("unit", "Unit override", "text"),
+      F("format", "Format", "seg", { options: [["", "Auto"], ["duration", "m:ss"]] }), F("hide_value", "Hide the number", "bool"), F("colors", "Colour rules", "colors")] },
+  pill: { label: "Status pill", ic: "⬭", cat: "Data", desc: "Big status like GPS LOCKED", fields: [F("entity", "Value", "ref"), F("text", "Text (blank = value)", "text", { valueText: true }), F("color", "Colour", "color"), F("size", "Font size (px)", "number"), F("colors", "Colour rules", "colors")] },
+  spark: { label: "History graph", ic: "∿", cat: "Data", desc: "Recent values as a line", fields: [F("entity", "Value", "ref"), F("label", "Label", "text"), F("minutes", "Minutes shown", "number"), F("color", "Line colour", "color")] },
+  entities: { label: "Entity list", ic: "≡", cat: "Data", desc: "Several entities as rows", fields: [F("entities", "Entities", "refs"), F("title", "Heading", "text"), F("colors", "Colour rules", "colors")] },
+  status: { label: "Status dots", ic: "⁘", cat: "Data", desc: "Dot per entity (on/off, ok/problem)", fields: [F("entities", "Entities", "refs"), F("colors", "Colour rules", "colors")] },
+  chips: { label: "Chips", ic: "◖", cat: "Data", desc: "Row of labelled pills (modes, ports…)",
+    fields: [F("source", "Chips from", "source"), F("label", "Chip text", "text", { def: "{item}" }), F("value_ref", "Value that sets the colour", "ref", { inItem: true }), F("colors", "Colour rules", "colors")] },
+  text: { label: "Text", ic: "T", cat: "Data", desc: "Heading, note or calculated text",
+    fields: [F("text", "Text", "text", { hint: "Use {item}, {id} or {{ HA template }}." }), F("size", "Size", "seg", { options: [["s", "S"], ["m", "M"], ["l", "L"], ["xl", "XL"]] }),
+      F("align", "Align", "seg", { options: [["left", "Left"], ["center", "Centre"], ["right", "Right"]] }), F("color", "Colour", "color")] },
+  button: { label: "Action button", ic: "⏻", cat: "Control", desc: "Runs an HA action, opens a detail or goes back",
+    fields: [F("label", "Label", "text"), F("action", "When pressed", "seg", { options: [["service", "Run action"], ["detail", "Open detail"], ["back", "Go back"]] }),
+      F("service", "Action", "service", { showIf: n => (n.props.action || "service") === "service" }),
+      F("target", "Target entity", "ref", { showIf: n => (n.props.action || "service") === "service", entityOnly: true }),
+      F("data", "Extra data (JSON)", "json", { showIf: n => (n.props.action || "service") === "service" }),
+      F("link", "Detail screen", "detail", { showIf: n => n.props.action === "detail" }),
+      F("confirm", "Safety", "seg", { options: [["none", "None"], ["confirm", "Confirm"], ["hold", "Hold 1.5 s"]] }),
+      F("confirm_title", "Confirm title", "text", { showIf: n => n.props.confirm && n.props.confirm !== "none" }),
+      F("confirm_text", "Confirm message", "text", { showIf: n => n.props.confirm && n.props.confirm !== "none", hint: "New lines: \\n" }),
+      F("danger", "Red confirm box", "bool", { showIf: n => n.props.confirm && n.props.confirm !== "none" }),
+      F("color", "Colour", "color"), F("size", "Font size (px)", "number"), F("filled", "Filled", "bool")] },
+  toggle: { label: "On/off toggle", ic: "◐", cat: "Control", desc: "Switch, fan or light", fields: [F("entity", "Entity", "ref", { entityOnly: true }), F("label", "Label", "text"), F("confirmOff", "Ask before turning off", "bool")] },
+  slider: { label: "Slider", ic: "⊸", cat: "Control", desc: "Brightness, fan % or a number", fields: [F("entity", "Entity", "ref", { entityOnly: true }), F("label", "Label", "text"), F("attr", "Controls", "seg", { options: [["brightness", "Brightness"], ["percentage", "Fan %"], ["value", "Number"]] })] },
+  banner: { label: "Status banner", ic: "⚑", cat: "Built-in", desc: "Top alert or “All systems normal”", fields: [F("h", "Height", "number")] },
+  alerts: { label: "Alert list", ic: "⚠", cat: "Built-in", desc: "Active alerts and their screen", fields: [F("max", "Max rows", "number"), SIZE] },
+  builtin: { label: "Built-in page", ic: "▣", cat: "Built-in", hidden: true, desc: "Old: one of RackView's original pages", fields: [F("page", "Page", "builtin")] },
+  ups_test: { label: "UPS self-test button", ic: "⚡", cat: "Special", desc: "Runs the UPS test and reports the result", fields: [] },
+  hunt_list: { label: "Port Hunt: client list", ic: "☰", cat: "Special", desc: "Wired clients; tap one to blink its jack", fields: [] },
+  hunt_faceplate: { label: "Port Hunt: switch faceplate", ic: "▦", cat: "Special", desc: "48-port faceplate with the jack lit", fields: [] },
+  hunt_client: { label: "Port Hunt: selected client", ic: "ⓘ", cat: "Special", desc: "Client details and the blink button", fields: [] },
+  wled_panel: { label: "Rack LED controls", ic: "✺", cat: "Special", desc: "WLED power, colour wheel, effects, speed…", fields: [SIZE] },
+};
+const CATS = ["Layout", "Nesting", "Data", "Control", "Built-in", "Special"];
+const inFree = n => { const p = findParent(n.id, view().root); return !!p && p.type === "free"; };
+const COMMON = [F("show_if", "Show only if", "cond"),
+  F("x", "X (px from the left)", "number", { showIf: inFree }), F("y", "Y (px from the top)", "number", { showIf: inFree }),
+  F("w", "Width (px)", "number"), F("h", "Height (px)", "number"),
+  F("r", "Right gap (px)", "number", { showIf: inFree, hint: "With a width: sticks to the right edge. Without: stretches to it." }),
+  F("b", "Bottom gap (px)", "number", { showIf: inFree }),
+  F("goto", "Tap opens screen", "screen"), F("link", "Tap opens detail screen", "detail", { showIf: n => !["card", "button"].includes(n.type) }),
+  F("ml", "Margin left (px)", "number"), F("mr", "Margin right (px)", "number"), F("mt", "Margin top (px)", "number")];
+const COLOR_WORDS = ["ok", "warn", "crit", "info", "dim", "muted", "text", "accent", "orange", "teal", "purple", "sand", "bg", "card", "card2", "line", "none"];
+const OPS = [["==", "="], ["!=", "≠"], [">", ">"], ["<", "<"], [">=", "≥"], ["<=", "≤"], ["contains", "contains"], ["is_empty", "is empty"], ["not_empty", "not empty"]];
+const SRC = { model: "RackView data (a list)", idrac: "iDRAC servers", fancontrol: "Fan controllers", entities: "Entities matching a pattern", attr: "A list inside an attribute", list: "Values I type" };
+
+/* ============================================================ model */
+let cfg = null, uid = 1;
+const nid = () => "n" + Date.now().toString(36) + (uid++);
+function N(type, props, children) { const n = { id: nid(), type, props: Object.assign({}, props || {}) }; if (TYPES[type].container) n.children = children || []; return n; }
+let sel = { screen: null, detail: null, node: null };
+let pv = { tab: {}, item: {}, detailItem: 0 };
+const hist = [], fut = [];
+let dirty = false;
+function snapshot() { hist.push(JSON.stringify(cfg)); if (hist.length > 100) hist.shift(); fut.length = 0; }
+function setDirty(v) { dirty = v; document.getElementById("dirty").hidden = !v; }
+function change(fn) { snapshot(); fn(); setDirty(true); renderAll(); }
+function screen() { return cfg.screens.find(s => s.id === sel.screen) || cfg.screens[0]; }
+function view() { const s = screen(); return sel.detail ? (s.details || []).find(d => d.id === sel.detail) || s : s; }
+function walkN(n, f) { f(n); (n.children || []).forEach(c => walkN(c, f)); }
+function findNode(id, root) { let hit = null; walkN(root, n => { if (!hit && n.id === id) hit = n; }); return hit; }
+function findParent(id, root) { for (const c of root.children || []) { if (c.id === id) return root; const r = findParent(id, c); if (r) return r; } return null; }
+function cur() { return sel.node ? findNode(sel.node, view().root) : null; }
+function ancestors(id) { const out = []; let p = findParent(id, view().root); while (p) { out.push(p); p = findParent(p.id, view().root); } return out; }
+function itemContext(node) { /* nearest repeater/list/chips that gives this node an item */
+  if (!node) return null; for (const a of ancestors(node.id)) if (["repeater", "listdetail"].includes(a.type)) return a; return node.type === "chips" ? node : null; }
+function fixSel() { if (!cfg.screens.find(s => s.id === sel.screen)) sel.screen = cfg.screens[0].id; if (sel.detail && !(screen().details || []).find(d => d.id === sel.detail)) sel.detail = null; if (sel.node && !cur()) sel.node = null; }
+function canHold(parent, type) { const T = TYPES[parent.type]; if (!T || !T.container) return false; if (T.accepts) return T.accepts.includes(type); return !TYPES[type].hidden; }
+function labelOf(n) { const p = n.props || {}; if (n.type === "builtin") return "Built-in: " + (p.page || "?");
+  if (n.type === "free" && !p.title) return "Free layout" + (p.bg ? " (" + p.bg + ")" : "");
+  if (["bar", "graph"].includes(n.type) && (p.value || p.source)) return TYPES[n.type].label + ": " + (p.value || p.source);
+  const pretty = t => typeof t === "string" ? t.replace(/\$\{([^}|]*)[^}]*\}/g, (m, r) => "‹" + r.trim().replace(/^[$@]/, "") + "›") : t;
+  if (n.type === "kv") return pretty(p.label) + " · " + pretty(p.text);
+  if (p.title || p.label || p.text) return pretty(p.title || p.label || p.text);
+  return (typeof p.entity === "string" && p.entity ? (ENT[p.entity.split("@")[0]] || {}).name || p.entity : "") || TYPES[n.type].label; }
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function newNode(type) {
+  const p = { tile: { label: "New tile" }, big: {}, value: { label: "Value" }, gauge: { label: "Bar", min: "0", max: "100" }, spark: { label: "History", minutes: 60 },
+    text: { text: "Heading", size: "m" }, button: { label: "Button", action: "service", confirm: "confirm", color: "info" }, toggle: {},
+    slider: { label: "Brightness", attr: "brightness" }, card: { title: "Card" }, repeater: { source: "idrac", mode: "one" }, listdetail: { source: "idrac" },
+    chips: { source: "list", values: "A, B, C", label: "{item}" }, alerts: { max: 6 }, entities: { entities: [] }, status: { entities: [] }, pill: {}, builtin: { page: "overview" },
+    free: { bg: "card", h: 140 }, label: { text: "Text", size: 15, x: 14, y: 10 }, kv: { label: "Name", text: "value", x: 14, y: 36, r: 14 }, bar: { value: "", max: 100, x: 14, y: 60, r: 14, h: 8 },
+    dot: { color: "ok", radius: 6, x: 14, y: 14, w: 12, h: 12 }, box: { color: "card2", x: 0, y: 0, h: 40 }, graph: { source: "$time.history", field: 1, h: 70 }, inline: { gap: 6 } }[type] || {};
+  const n = N(type, p);
+  if (type === "tabs") n.children = [N("tab", { title: "Tab 1" }), N("tab", { title: "Tab 2" })];
+  if (type === "listdetail") n.children = [N("slot", { name: "List row" }, [N("text", { text: "{item}", size: "m" })]), N("slot", { name: "Detail" }, [N("card", { title: "{item}" })])];
+  if (type === "repeater") n.children = [N("card", { title: "{item}" })];
+  const par = cur() || view().root; if (!(par.type === "free" || (findParent(par.id, view().root) || {}).type === "free")) ["x", "y", "r"].forEach(k => delete n.props[k]);
+  return n;
+}
+function cloneNode(n) { const c = JSON.parse(JSON.stringify(n)); walkN(c, x => x.id = nid()); return c; }
+function addNode(type) {
+  const v = view(); const target = cur() || v.root;
+  change(() => {
+    const n = newNode(type);
+    if (canHold(target, type)) target.children.push(n);
+    else { const p = findParent(target.id, v.root) || v.root; if (!canHold(p, type)) { toast(`${TYPES[type].label} can't go inside ${TYPES[p.type].label}.`); return; } p.children.splice(p.children.indexOf(target) + 1, 0, n); }
+    sel.node = n.id;
+  });
+}
+function removeNode(id) { const v = view(); if (v.root.id === id) return toast("Change the screen's top layout instead of deleting it.");
+  change(() => { const p = findParent(id, v.root); p.children = p.children.filter(c => c.id !== id); sel.node = p.id; }); }
+
+/* ============================================================ tree + drag and drop */
+const treeEl = document.getElementById("tree");
+function nodeRows(n) {
+  const T = TYPES[n.type] || { ic: "?", label: n.type }; let tag = "";
+  if (n.props && n.props.link) tag = `<span class="tag">› detail</span>`;
+  if (n.type === "repeater") tag = `<span class="tag">${n.props.mode === "all" ? "all" : "one"}</span>`;
+  if (n.props && n.props.show_if && n.props.show_if.ref) tag += `<span class="tag" title="Shown only if…">if</span>`;
+  let h = `<li><div class="row${sel.node === n.id ? " sel" : ""}" draggable="true" data-node="${n.id}"><span class="ic">${T.ic}</span><span class="lbl">${esc(labelOf(n))}</span>${tag}<span class="kind">${T.label}</span></div>`;
+  if (n.children && n.children.length) h += `<ul>${n.children.map(nodeRows).join("")}</ul>`;
+  return h + "</li>";
+}
+function renderTree() {
+  treeEl.innerHTML = cfg.screens.map(s => {
+    const open = s.id === sel.screen;
+    let h = `<li><div class="row screen${open && !sel.detail && !sel.node ? " sel" : ""}${s.enabled === false ? " off" : ""}" data-screen="${esc(s.id)}" draggable="true"><span class="swatch" style="background:${esc(s.color || "#888")}"></span><span class="lbl">${esc(s.title || s.id)}</span>${s.root && s.root.type === "builtin" ? `<span class="tag">built-in</span>` : ""}</div>`;
+    if (open) {
+      h += `<ul>${!sel.detail ? nodeRows(s.root) : ""}`;
+      (s.details || []).forEach(d => {
+        h += `<li><div class="row${sel.detail === d.id && !sel.node ? " sel" : ""}" data-detail="${esc(d.id)}"><span class="ic">↳</span><span class="lbl">${esc(d.title)}</span><span class="kind">detail</span></div>`;
+        if (sel.detail === d.id) h += `<ul>${nodeRows(d.root)}</ul>`;
+        h += `</li>`;
+      });
+      h += `<li><div class="addbar"><button class="btn small" data-act="adddetail">+ Detail screen</button></div></li></ul>`;
+    }
+    return h + "</li>";
+  }).join("");
+}
+treeEl.addEventListener("click", e => {
+  const r = e.target.closest("[data-screen],[data-detail],[data-node],[data-act]"); if (!r) return;
+  if (r.dataset.act === "adddetail") return change(() => { const s = screen(); s.details = s.details || []; const id = s.id + "-d" + (s.details.length + 1);
+    s.details.push({ id, title: "New detail", root: N("column", {}, [N("card", { title: "{item}" })]) }); sel.detail = id; sel.node = null; });
+  if (r.dataset.screen) sel = { screen: r.dataset.screen, detail: null, node: null };
+  else if (r.dataset.detail) { sel.detail = r.dataset.detail; sel.node = null; }
+  else if (r.dataset.node) sel.node = r.dataset.node;
+  renderAll();
+});
+let drag = null;
+treeEl.addEventListener("dragstart", e => { const r = e.target.closest("[data-node],[data-screen]"); if (!r) return; drag = r.dataset.node ? { node: r.dataset.node } : { screen: r.dataset.screen }; e.dataTransfer.setData("text/plain", "x"); });
+function zone(e, r) { const b = r.getBoundingClientRect(); const y = (e.clientY - b.top) / b.height; return y < .28 ? "before" : y > .72 ? "after" : "inside"; }
+function clearDrop() { treeEl.querySelectorAll(".drop-before,.drop-after,.drop-inside").forEach(x => x.classList.remove("drop-before", "drop-after", "drop-inside")); }
+treeEl.addEventListener("dragover", e => { const r = e.target.closest("[data-node],[data-screen]"); if (!r || !drag) return; e.preventDefault(); clearDrop();
+  let z = zone(e, r); if (drag.screen || r.dataset.screen) z = z === "inside" ? "after" : z; r.classList.add("drop-" + z); });
+treeEl.addEventListener("drop", e => {
+  e.preventDefault(); const r = e.target.closest("[data-node],[data-screen]"); const d = drag; drag = null; clearDrop(); if (!r || !d) return;
+  if (d.screen && r.dataset.screen) { const z = zone(e, r); return change(() => { const a = cfg.screens.findIndex(s => s.id === d.screen); const [s] = cfg.screens.splice(a, 1);
+    let b = cfg.screens.findIndex(x => x.id === r.dataset.screen); if (z !== "before") b++; cfg.screens.splice(b, 0, s); }); }
+  if (!d.node || !r.dataset.node || d.node === r.dataset.node) return;
+  moveNode(d.node, r.dataset.node, zone(e, r));
+});
+function moveNode(mid, tid, z) {
+  const root = view().root; const moving = findNode(mid, root), target = findNode(tid, root);
+  if (!moving || !target || moving === root || findNode(target.id, moving)) return toast("A layout can't move inside itself.");
+  let parent, index;
+  if (z === "inside" && canHold(target, moving.type)) { parent = target; index = target.children.length; }
+  else { parent = findParent(target.id, root); if (!parent) return; if (z === "inside") z = "after"; index = parent.children.indexOf(target) + (z === "after" ? 1 : 0); }
+  if (!canHold(parent, moving.type)) return toast(`${TYPES[moving.type].label} can't go inside ${TYPES[parent.type].label}.`);
+  change(() => { const old = findParent(moving.id, root); const oi = old.children.indexOf(moving); old.children.splice(oi, 1); if (old === parent && oi < index) index--; parent.children.splice(index, 0, moving); sel.node = moving.id; });
+}
+function renderPalette() {
+  const t = cur() || view().root;
+  document.getElementById("palette").innerHTML = `<h3 style="margin-top:2px">Add to “${esc(labelOf(t))}”</h3>` + CATS.map(c => `<h3>${c}</h3><div class="pal-grid">${
+    Object.entries(TYPES).filter(([k, T]) => T.cat === c && !T.hidden).map(([k, T]) => `<button class="pal" data-add="${k}" title="${esc(T.desc)}"><span class="ic">${T.ic}</span><span><b>${T.label}</b><small>${esc(T.desc)}</small></span></button>`).join("")}</div>`).join("");
+}
+document.getElementById("palette").addEventListener("click", e => { const b = e.target.closest("[data-add]"); if (b) addNode(b.dataset.add); });
+document.getElementById("addscreen").onclick = () => {
+  const opts = (SOURCES.builtin || []).filter(b => !cfg.screens.some(s => s.id === b.id)).map(b => `<option value="${b.id}">Built-in: ${esc(b.name)}</option>`).join("");
+  modal(`<b>Add a screen</b><div class="field"><label for="ns-kind">Start from</label><select id="ns-kind"><option value="blank">Blank screen</option><option value="cards">Two cards side by side</option>${opts}</select></div>
+    <div class="field"><label for="ns-title">Title</label><input type="text" id="ns-title" value="New screen"></div><div class="actions"><button class="btn primary" id="ns-ok">Add</button><button class="btn" data-close>Cancel</button></div>`, m => {
+    m.querySelector("#ns-ok").onclick = () => { const k = m.querySelector("#ns-kind").value; const title = m.querySelector("#ns-title").value || "Screen"; closeModal();
+      change(() => { let id, root;
+        if (k === "blank" || k === "cards") { id = "s-" + Date.now().toString(36); root = k === "cards" ? N("row", {}, [N("card", { title: "Left" }), N("card", { title: "Right" })]) : N("column", {}, [N("card", { title: "Card" })]); }
+        else { id = k; root = N("builtin", { page: k }); }
+        cfg.screens.push({ id, title: k !== "blank" && k !== "cards" && title === "New screen" ? ((SOURCES.builtin || []).find(b => b.id === k) || {}).name : title, color: "#7ee787", enabled: true, middle: root.type === "builtin" ? "builtin" : "home", root, details: [] });
+        sel = { screen: id, detail: null, node: null }; }); };
+  });
+};
+
+/* ============================================================ preview (exact render from the display) */
+const frame = document.getElementById("frame");
+let pvTimer = null, pvBusy = false, pvAgain = false, rects = [];
+function schedulePreview(delay) { clearTimeout(pvTimer); pvTimer = setTimeout(renderPreview, delay == null ? 300 : delay); }
+async function renderPreview() {
+  if (pvBusy) { pvAgain = true; return; }
+  pvBusy = true; const s = screen();
+  const state = { tab: pv.tab, item: pv.item };
+  if (sel.detail) { const holder = detailHolder(sel.detail); if (holder) { state.detail_item = pv.detailItem; state.detail_item_src = holder.props; } }
+  try {
+    const r = await api("/api/preview", { method: "POST", body: JSON.stringify({ screen: s, detail: sel.detail, state }) });
+    rects = r.rects;
+    frame.innerHTML = `<img alt="Preview of ${esc(s.title)}" src="data:image/png;base64,${r.png}">` +
+      rects.map(([id, x, y, w, h], i) => `<div class="hot${id === sel.node ? " sel" : ""}" data-hot="${id}" style="left:${x}px;top:${y}px;width:${w}px;height:${h}px;z-index:${i + 1}"></div>`).join("");
+    document.getElementById("pvstate").textContent = "live · " + new Date().toLocaleTimeString();
+  } catch (e) { if (e.message !== "login") frame.innerHTML = `<div class="msg">Preview unavailable: ${esc(e.message)}</div>`; }
+  pvBusy = false; if (pvAgain) { pvAgain = false; schedulePreview(50); }
+}
+setInterval(() => { if (!document.hidden && !document.getElementById("view-screens").hidden) renderPreview(); }, 5000);
+frame.addEventListener("click", e => {
+  const hits = [...frame.querySelectorAll("[data-hot]")].filter(h => { const b = h.getBoundingClientRect(); return e.clientX >= b.left && e.clientX <= b.right && e.clientY >= b.top && e.clientY <= b.bottom; });
+  if (!hits.length) return;
+  const ids = [...new Set(hits.map(h => h.dataset.hot))];
+  /* click again on the same spot to walk outwards to the parent */
+  const i = ids.indexOf(sel.node); const pick = i > 0 ? ids[i - 1] : ids[ids.length - 1];
+  sel.node = pick; renderAll(false);
+});
+function fit() { const w = Math.max(240, document.getElementById("framewrap").clientWidth - 24); const k = Math.min(1, w / 800);
+  frame.style.transform = `scale(${k})`; const b = document.getElementById("framebox"); b.style.width = 800 * k + "px"; b.style.height = 480 * k + "px"; }
+window.addEventListener("resize", fit);
+function detailHolder(did) { let holder = null; walkN(screen().root, n => { if (n.type === "repeater") walkN(n, c => { if (c.props && c.props.link === did && !holder) holder = n; }); }); return holder; }
+function renderCrumbs() {
+  const s = screen(), c = document.getElementById("crumbs");
+  let h = `<span class="swatch" style="background:${esc(s.color)}"></span>` + (sel.detail ? `<button data-crumb>${esc(s.title)}</button>›<b>${esc(view().title)}</b>` : `<b>${esc(s.title)}</b>`);
+  if (sel.detail) { const holder = detailHolder(sel.detail); if (holder) h += ` <span class="hint">for</span> <select id="pv-ditem">${(holder._items || []).map((it, i) => `<option value="${i}" ${i === pv.detailItem ? "selected" : ""}>${esc(it.name)}</option>`).join("")}</select>`; }
+  const n = cur(); if (n) h += ` › <span>${esc(labelOf(n))}</span>`;
+  c.innerHTML = h;
+  if (sel.detail) { const holder = detailHolder(sel.detail); if (holder && !holder._items) loadItems(holder).then(() => renderCrumbs()); }
+}
+document.getElementById("crumbs").addEventListener("click", e => { if (e.target.closest("[data-crumb]")) { sel.detail = null; sel.node = null; renderAll(); } });
+document.getElementById("crumbs").addEventListener("change", e => { if (e.target.id === "pv-ditem") { pv.detailItem = +e.target.value; schedulePreview(0); } });
+async function loadItems(node, item) { try { node._items = await api("/api/items", { method: "POST", body: JSON.stringify({ props: node.props, item: item || null }) }); } catch (e) { node._items = []; } return node._items; }
+
+/* ============================================================ inspector */
+const insp = document.getElementById("insp");
+function refField(n, f, v, id) {
+  const ctx = f.inItem ? n : itemContext(n);
+  const isT = typeof v === "string" && v.includes("{{");
+  const ent = !isT && typeof v === "string" && !v.startsWith("@") ? v.split("@")[0] : "";
+  const path = !isT && typeof v === "string" && v.includes("@") && !v.startsWith("@") ? v.split("@").slice(1).join("@") : "";
+  const attrs = ent && ENT[ent] ? Object.keys(ENT[ent].attrs || {}) : [];
+  let h = `<div class="field"><label for="${id}">${esc(f.label)}</label>`;
+  if (isT) h += `<textarea id="${id}" data-k="${f.key}" data-tpl="1" spellcheck="false">${esc(v)}</textarea><div class="result" id="${id}-res">…</div>`;
+  else {
+    h += `<div class="picker"><input type="text" class="mono" id="${id}" data-ref="${f.key}" value="${esc(v)}" placeholder="${f.entityOnly ? "entity id" : "entity, entity@attribute, $data.path or @field"}" autocomplete="off"></div>`;
+    if (attrs.length && !f.entityOnly) h += `<select class="mini" data-attr="${f.key}"><option value="">State: ${esc(ENT[ent].state)} ${esc(ENT[ent].unit)}</option>${attrs.map(a => `<option value="${esc(a)}" ${path.split(".")[0] === a ? "selected" : ""}>Attribute: ${esc(a)} ${attrHint(ENT[ent].attrs[a])}</option>`).join("")}</select>`;
+    if (path) h += `<input type="text" class="mini mono" data-path="${f.key}" value="${esc(path)}" title="Attribute path, e.g. live.call or clients.0.name">`;
+    h += `<div class="result" id="${id}-res">${v ? "…" : `<span class="hint">empty</span>`}</div>`;
+  }
+  const chips = [];
+  if (ctx) chips.push(...itemFields(ctx).map(k => `<span class="chip add" data-set="${f.key}" data-v="@${esc(k)}">@${esc(k)}</span>`));
+  if (!f.entityOnly && !isT) chips.push(`<span class="chip add" data-modelpick="${f.key}">＄ RackView data</span>`);
+  if (!f.entityOnly) chips.push(`<span class="chip add" data-toggle-tpl="${f.key}">${isT ? "Use a picker" : "{{ template }}"}</span>`);
+  if (chips.length) h += `<div class="chips">${chips.join("")}</div>`;
+  if (ctx && !isT) h += `<span class="hint">Inside “${esc(labelOf(ctx))}”: {id} = item id (e.g. <span class="mono">sensor.idrac_{id}_power</span>), @field = a field of the item.</span>`;
+  return h + `</div>`;
+}
+function attrHint(a) { if (a && typeof a === "object") return a.list != null ? `(list of ${a.list})` : a.dict ? "(object)" : ""; return a == null ? "" : `= ${String(a).slice(0, 24)}`; }
+function itemFields(ctx) {
+  const its = ctx._items; const keys = new Set(["name", "id"]);
+  if (its && its[0]) Object.keys(its[0]).forEach(k => keys.add(k));
+  else if (ctx.props.source === "entities") ["state", "entity", "unit"].forEach(k => keys.add(k));
+  if (!its) loadItems(ctx).then(() => { if (cur() && itemContext(cur()) === ctx) renderInspector(); });
+  return [...keys].slice(0, 14);
+}
+function condField(n, f, v) {
+  const c = v || {}; const id = `f-${n.id}-cond`;
+  return `<div class="field"><span class="flabel">${esc(f.label)}</span><div class="rule"><select data-cond="op" aria-label="Condition">${OPS.map(([o, l]) => `<option value="${o}" ${(c.op || "==") === o ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <input type="text" class="mono" id="${id}" data-cond="ref" value="${esc(c.ref || "")}" placeholder="entity or @field" aria-label="Value to test"><input type="text" data-cond="value" value="${esc(c.value == null ? "" : c.value)}" placeholder="value" aria-label="Compare with"><button class="btn small" data-cond-clear title="Remove condition">×</button></div>
+    <span class="hint">Hide this unless the condition is true, e.g. power state = on.</span></div>`;
+}
+function colorsField(n, f, v) {
+  const rows = (v || []).map((c, i) => `<div class="rule"><select data-ci="${i}" data-ck="op">${OPS.map(([o, l]) => `<option value="${o}" ${c.op === o ? "selected" : ""}>${l}</option>`).join("")}</select>
+    <input type="text" data-ci="${i}" data-ck="value" value="${esc(c.value)}" placeholder="value"><select data-ci="${i}" data-ck="color">${COLORS.map(([k, l]) => `<option value="${k}" ${c.color === k ? "selected" : ""}>${l}</option>`).join("")}</select><button class="btn small" data-cdel="${i}">×</button></div>`).join("");
+  return `<div class="field"><span class="flabel">${esc(f.label)}</span><div class="rules">${rows}</div><button class="btn small" data-cadd style="align-self:flex-start">+ Colour rule</button><span class="hint">First matching rule wins, tested against this widget's value.</span></div>`;
+}
+function sourceField(n, f, v) {
+  const p = n.props; const id = `f-${n.id}-src`;
+  let h = `<div class="field"><label for="${id}">${esc(f.label)}</label><select id="${id}" data-k="source">${Object.entries(SRC).map(([k, l]) => `<option value="${k}" ${v === k ? "selected" : ""}>${l}</option>`).join("")}</select>`;
+  if (v === "entities") h += `<input type="text" class="mono" data-k="pattern" value="${esc(p.pattern || "")}" placeholder="sensor.idrac_{id}_*_temp"><label class="check"><input type="checkbox" data-kb="short_names" ${p.short_names !== false ? "checked" : ""}> Short names</label><label class="check"><input type="checkbox" data-kb="skip_unavailable" ${p.skip_unavailable !== false ? "checked" : ""}> Hide unavailable</label>`;
+  if (v === "attr") h += `<input type="text" class="mono" data-k="ref" value="${esc(p.ref || "")}" placeholder="sensor.x@last_heard" list="attrlists"><datalist id="attrlists">${ENTS.flatMap(e => Object.entries(e.attrs || {}).filter(([k, a]) => a && typeof a === "object").map(([k]) => `<option value="${esc(e.id)}@${esc(k)}">`)).slice(0, 300).join("")}</datalist>`;
+  if (v === "list") h += `<input type="text" data-k="values" value="${esc(p.values || "")}" placeholder="router, compileserver, unraid">`;
+  if (v === "model") h += `<input type="text" class="mono" data-k="path" value="${esc(p.path || "")}" placeholder="$servers  or  @fans" list="modellists"><datalist id="modellists">${MODEL.filter(m => m.list).map(m => `<option value="$${esc(m.path)}">${esc(m.value)}</option>`).join("")}</datalist>`;
+  const its = n._items;
+  h += `<span class="hint">${its ? `${its.length} item${its.length === 1 ? "" : "s"} now${its.length ? ": " + esc(its.slice(0, 5).map(i => i.name).join(", ")) + (its.length > 5 ? "…" : "") : ""}` : "Checking items…"}</span></div>`;
+  if (!its) loadItems(n, null).then(() => { if (cur() === n) renderInspector(); });
+  return h;
+}
+function fieldHTML(n, f) {
+  const v = n.props[f.key] == null && f.def !== undefined ? f.def : n.props[f.key]; const id = `f-${n.id}-${f.key}`;
+  const lab = `<label for="${id}">${esc(f.label)}</label>`, hint = f.hint ? `<span class="hint">${esc(f.hint)}</span>` : "";
+  switch (f.type) {
+    case "text": return `<div class="field">${lab}<input type="text" id="${id}" data-k="${f.key}" value="${esc(v)}">${f.valueText ? `<div class="chips"><span class="chip add" data-modelins="${f.key}">＋ Insert a value</span>${itemContext(n) ? itemFields(itemContext(n)).map(k => `<span class="chip add" data-ins="${f.key}" data-v="\${@${esc(k)}}">@${esc(k)}</span>`).join("") : ""}</div>` : ""}${hint}${typeof v === "string" && (v.includes("{{") || v.includes("${")) ? `<div class="result" id="${id}-res">…</div>` : ""}</div>`;
+    case "number": return `<div class="field">${lab}<input type="number" id="${id}" data-k="${f.key}" data-num="1" value="${esc(v)}">${hint}</div>`;
+    case "bool": return `<div class="field"><label class="check"><input type="checkbox" id="${id}" data-kb="${f.key}" ${v ? "checked" : ""}> ${esc(f.label)}</label>${hint}</div>`;
+    case "rule": return `<div class="field">${lab}<input type="text" class="mono" id="${id}" data-k="${f.key}" value="${esc(v)}" placeholder="e.g. < 60   or   != online"></div>`;
+    case "json": return `<div class="field">${lab}<textarea id="${id}" data-k="${f.key}" spellcheck="false" placeholder='{"duration_ms": 400}'>${esc(v)}</textarea></div>`;
+    case "seg": return `<div class="field"><span class="flabel">${esc(f.label)}</span><div class="seg">${f.options.map(([k, l]) => `<button type="button" data-seg="${f.key}" data-v="${k}" aria-pressed="${(v || f.options[0][0]) === k}">${l}</button>`).join("")}</div>${hint}</div>`;
+    case "color":
+      if (v && typeof v === "object") return `<div class="field">${lab}<textarea id="${id}" class="mono" data-json="${f.key}" spellcheck="false">${esc(JSON.stringify(v, null, 1))}</textarea><span class="hint">Colour map or rules (JSON). <button type="button" class="btn small" data-set="${f.key}" data-v="">Use a simple colour</button></span></div>`;
+      return `<div class="field">${lab}<div class="colorrow"><span class="swatch" style="background:${esc(swatchOf(v))}"></span><input type="text" class="mono" id="${id}" data-k="${f.key}" list="colorwords" value="${esc(v)}" placeholder="default"></div><span class="hint">A colour name (ok, warn, crit, info, dim, muted, text, accent, card…), #rrggbb, or a ref holding one, e.g. @color. <button type="button" class="btn small" data-colormap="${f.key}">By value…</button></span></div>`;
+    case "screen": return `<div class="field">${lab}<select id="${id}" data-k="${f.key}"><option value="">— none —</option>${cfg.screens.map(x => `<option value="${esc(x.id)}" ${v === x.id ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select></div>`;
+    case "detail": return `<div class="field">${lab}<select id="${id}" data-k="${f.key}"><option value="">— none —</option>${(screen().details || []).map(d => `<option value="${esc(d.id)}" ${v === d.id ? "selected" : ""}>${esc(d.title)}</option>`).join("")}<option value="__new">+ New detail screen…</option></select>${hint}</div>`;
+    case "builtin": return `<div class="field">${lab}<select id="${id}" data-k="${f.key}">${(SOURCES.builtin || []).map(b => `<option value="${b.id}" ${v === b.id ? "selected" : ""}>${esc(b.name)}</option>`).join("")}</select><span class="hint">Draws the original page. On a screen whose id matches the page, it keeps that page's own buttons and alerts.</span></div>`;
+    case "service": return `<div class="field">${lab}<input type="text" class="mono" id="${id}" data-k="${f.key}" list="svc" value="${esc(v)}" placeholder="domain.service"><datalist id="svc">${["button.press", "switch.toggle", "switch.turn_on", "switch.turn_off", "light.toggle", "light.turn_on", "light.turn_off", "fan.turn_on", "fan.turn_off", "script.turn_on", "scene.turn_on", "automation.trigger", "homeassistant.update_entity", "uiwled.set_port"].map(s => `<option value="${s}">`).join("")}</datalist></div>`;
+    case "ref": return refField(n, f, v, id);
+    case "refs": return `<div class="field"><span class="flabel">${esc(f.label)}</span><div class="chips">${(v || []).map((e, i) => `<span class="chip">${esc(e)}<button type="button" data-rm="${f.key}" data-i="${i}" aria-label="Remove">×</button></span>`).join("")}</div><div class="picker"><input type="text" class="mono" id="${id}" data-refs="${f.key}" placeholder="+ Add entity…" autocomplete="off"></div></div>`;
+    case "cond": return condField(n, f, v);
+    case "colors": return colorsField(n, f, v);
+    case "source": return sourceField(n, f, v);
+  }
+  return "";
+}
+function renderInspector() {
+  const n = cur(), s = screen(), v = view();
+  if (!n) {
+    if (sel.detail) {
+      insp.innerHTML = `<div class="what"><span class="ic">↳</span><div><b>${esc(v.title)}</b><small>Detail screen of ${esc(s.title)}</small></div></div>
+        <div class="field"><label for="d-title">Title</label><input type="text" id="d-title" value="${esc(v.title)}"></div>
+        <div class="helpbox">Opened by a <b>Card</b> with “Opens detail screen”, an <b>Action button</b> set to “Open detail”, or the middle button when the screen's middle action is <b>Cycle detail screens</b>. A card inside a <b>Repeater</b> opens it for that item, so <span class="mono">{item}</span> and <span class="mono">{id}</span> work here.</div>
+        <div class="actions"><button class="btn small" data-act="dupdetail">Duplicate</button><button class="btn small danger" data-act="deldetail">Delete detail screen</button></div>`;
+      return;
+    }
+    const isB = s.root && s.root.type === "builtin";
+    insp.innerHTML = `<div class="what"><span class="ic" style="background:${esc(s.color)}33;color:${esc(s.color)}">▣</span><div><b>${esc(s.title)}</b><small>Screen · id ${esc(s.id)}</small></div></div>
+      <div class="field"><label for="s-title">Title</label><input type="text" id="s-title" value="${esc(s.title)}"></div>
+      <div class="field"><label for="s-color">Page colour</label><input type="color" id="s-color" value="${esc(s.color || "#7ee787")}"><span class="hint">Bar under the title and the ▲▼ button LEDs.</span></div>
+      <div class="field"><label class="check"><input type="checkbox" id="s-en" ${s.enabled !== false ? "checked" : ""}> Show this screen</label></div>
+      <div class="field"><label for="s-mid">Middle button</label><select id="s-mid">${Object.entries({ builtin: "The built-in page's own action", silence: "Silence alarms, then sleep", home: "Go to the first screen", next: "Next item (first Repeater set to One at a time)", details: "Cycle detail screens, then back", reping: "Ping again now", hunt: "Port Hunt: blink / stop", wled_power: "Rack LEDs on / off" }).filter(([k]) => isB || k !== "builtin").map(([k, l]) => `<option value="${k}" ${(s.middle || "home") === k ? "selected" : ""}>${l}</option>`).join("")}</select><span class="hint">▲ / ▼ always change screens; holding the middle button turns the screen off.</span></div>
+      ${s.middle === "next" ? `<div class="field"><label for="s-midlabel">Middle button label</label><input type="text" id="s-midlabel" value="${esc(s.middle_label || "")}" placeholder="Next item"></div>` : ""}
+      <div class="actions"><button class="btn small" data-act="dupscreen">Duplicate screen</button><button class="btn small danger" data-act="delscreen">Delete screen</button></div>`;
+    return;
+  }
+  const T = TYPES[n.type] || { label: n.type, ic: "?", fields: [] };
+  const path = ancestors(n.id).reverse().map(labelOf).join(" › ");
+  insp.innerHTML = `<div class="what"><span class="ic">${T.ic}</span><div><b>${esc(labelOf(n))}</b><small>${T.label} · ${esc(T.desc || "")}</small></div></div>
+    <span class="hint">In: ${esc(path || v.title)}</span>
+    ${T.fields.filter(f => !f.showIf || f.showIf(n)).map(f => fieldHTML(n, f)).join("")}
+    ${help(n)}
+    <details class="adv"${n.props.show_if || n.props.w || n.props.h || inFree(n) ? " open" : ""}><summary>${inFree(n) ? "Position · size · show if · tap" : "Show only if · size · tap"}</summary>${COMMON.filter(f => !f.showIf || f.showIf(n)).map(f => fieldHTML(n, f)).join("")}</details>
+    <hr class="sep"><div class="actions"><button class="btn small" data-act="up">Move up</button><button class="btn small" data-act="down">Move down</button><button class="btn small" data-act="dup">Duplicate</button>${T.container ? `<button class="btn small" data-act="wrap">Wrap in card</button>` : ""}${n.type === "tabs" ? `<button class="btn small" data-act="addtab">+ Tab</button>` : ""}<button class="btn small danger" data-act="del">Delete</button></div>`;
+  refreshResults(n);
+}
+function help(n) {
+  if (n.type === "repeater") return `<div class="helpbox"><b>Repeater</b> draws its contents once per item. Use <span class="mono">{item}</span> in titles and <span class="mono">{id}</span> in entity ids. With <b>One at a time</b>, set the screen's middle button to <b>Next item</b>. Preview item: <button class="btn small" data-act="previtem">‹</button> <button class="btn small" data-act="nextitem">›</button></div>`;
+  if (n.type === "listdetail") return `<div class="helpbox"><b>List → Detail</b>: the <b>List row</b> slot is how each row looks; the <b>Detail</b> slot shows the selected row. Preview row: <button class="btn small" data-act="previtem">‹</button> <button class="btn small" data-act="nextitem">›</button></div>`;
+  if (n.type === "tabs") return `<div class="helpbox">Each <b>Tab</b> is its own layout; select a tab in the tree to edit and preview it.</div>`;
+  if (n.type === "card") return `<div class="helpbox">Pick a detail screen above to nest a deeper view; the card gets a “Details ›” link.</div>`;
+  return "";
+}
+/* live values next to ref / template fields */
+let resTimer = null;
+function refreshResults(n) {
+  clearTimeout(resTimer);
+  resTimer = setTimeout(async () => {
+    const ctx = itemContext(n); let item = null;
+    if (ctx) { const its = ctx._items || await loadItems(ctx); item = its[(pv.item[ctx.id] || 0) % Math.max(1, its.length)] || null; }
+    for (const el of insp.querySelectorAll(".result[id]")) {
+      const key = el.id.split("-").slice(2, -1).join("-"); const v = n.props[key]; if (!v) continue;
+      try {
+        if (typeof v === "string" && v.includes("${") && !v.includes("{{")) { const r = await api("/api/text", { method: "POST", body: JSON.stringify({ text: v, item }) });
+          el.textContent = "= " + r.text; el.classList.remove("err"); continue; }
+        if (typeof v === "string" && v.includes("{{")) { const r = await api("/api/template", { method: "POST", body: JSON.stringify({ template: v, item }) });
+          el.textContent = r.error ? "⚠ " + r.error : "= " + r.result; el.classList.toggle("err", !!r.error); }
+        else { const r = await api("/api/resolve", { method: "POST", body: JSON.stringify({ refs: [v], item }) }); const x = r[v] || {};
+          el.textContent = x.error ? "⚠ " + x.error : "= " + (x.value == null ? "(no value)" : (typeof x.value === "object" ? JSON.stringify(x.value).slice(0, 120) : x.text)); el.classList.toggle("err", !!x.error || x.value == null); }
+      } catch (e) { el.textContent = "⚠ " + e.message; el.classList.add("err"); }
+    }
+  }, 250);
+}
+let snapOnce = false;
+function soft() { if (!snapOnce) { snapshot(); snapOnce = true; setTimeout(() => snapOnce = false, 900); } setDirty(true); renderTree(); renderCrumbs(); schedulePreview(); }
+insp.addEventListener("input", e => {
+  const t = e.target, n = cur(), s = screen();
+  if (t.id === "s-title") { soft(); s.title = t.value; return; }
+  if (t.id === "s-color") { soft(); s.color = t.value; return; }
+  if (t.id === "d-title") { soft(); view().title = t.value; return; }
+  if (t.id === "s-midlabel") { soft(); s.middle_label = t.value; return; }
+  if (t.dataset.json && n) { try { const j = JSON.parse(t.value); soft(); n.props[t.dataset.json] = j; t.classList.remove("bad"); } catch (err) { t.classList.add("bad"); } return; }
+  if (!n) return;
+  if (t.dataset.k && t.tagName !== "SELECT" && !t.dataset.kb) { soft(); n.props[t.dataset.k] = t.dataset.num ? (t.value === "" ? "" : +t.value) : t.value; delete n._items; if (t.dataset.tpl || t.classList.contains("mono") || t.value.includes("${")) refreshResults(n);
+    const sw = t.parentElement.querySelector(".swatch"); if (sw) sw.style.background = swatchOf(t.value); }
+  if (t.dataset.ref) { soft(); n.props[t.dataset.ref] = t.value.trim(); openPicker(t); refreshResults(n); }
+  if (t.dataset.path) { soft(); const base = String(n.props[t.dataset.path] || "").split("@")[0]; n.props[t.dataset.path] = t.value ? base + "@" + t.value : base; refreshResults(n); }
+  if (t.dataset.refs) openPicker(t);
+  if (t.dataset.cond) { soft(); n.props.show_if = Object.assign({ op: "==" }, n.props.show_if || {}, { [t.dataset.cond]: t.value }); }
+  if (t.dataset.ci) { soft(); n.props.colors[+t.dataset.ci][t.dataset.ck] = t.value; }
+});
+insp.addEventListener("change", e => {
+  const t = e.target, n = cur(), s = screen();
+  if (t.id === "s-en") return change(() => s.enabled = t.checked);
+  if (t.id === "s-mid") return change(() => s.middle = t.value);
+  if (!n) return;
+  if (t.dataset.kb) return change(() => { n.props[t.dataset.kb] = t.checked; delete n._items; });
+  if (t.dataset.attr !== undefined) return change(() => { const base = String(n.props[t.dataset.attr] || "").split("@")[0]; n.props[t.dataset.attr] = t.value ? base + "@" + t.value : base; });
+  if (t.dataset.cond === "op") return change(() => n.props.show_if = Object.assign({}, n.props.show_if || {}, { op: t.value }));
+  if (t.dataset.ci) return change(() => n.props.colors[+t.dataset.ci][t.dataset.ck] = t.value);
+  if (t.tagName === "SELECT" && t.dataset.k) {
+    if (t.value === "__new") return change(() => { s.details = s.details || []; const id = s.id + "-d" + (s.details.length + 1);
+      s.details.push({ id, title: (labelOf(n) + " details").trim(), root: N("column", {}, [N("card", { title: "{item}" })]) }); n.props[t.dataset.k] = id; });
+    return change(() => { n.props[t.dataset.k] = t.value; delete n._items; });
+  }
+});
+insp.addEventListener("click", e => {
+  const b = e.target.closest("button, .chip.add"); if (!b) return; const n = cur(), s = screen(), v = view();
+  if (b.dataset.seg) return change(() => n.props[b.dataset.seg] = b.dataset.v);
+  if (b.dataset.rm) return change(() => n.props[b.dataset.rm].splice(+b.dataset.i, 1));
+  if (b.dataset.set !== undefined && b.dataset.set) return change(() => n.props[b.dataset.set] = b.dataset.v);
+  if (b.dataset.ins) return change(() => n.props[b.dataset.ins] = (n.props[b.dataset.ins] || "") + b.dataset.v);
+  if (b.dataset.modelpick) return modelPicker(path => change(() => n.props[b.dataset.modelpick] = "$" + path));
+  if (b.dataset.modelins) return modelPicker(path => change(() => n.props[b.dataset.modelins] = (n.props[b.dataset.modelins] || "") + "${$" + path + "}"));
+  if (b.dataset.colormap) return change(() => { const k = b.dataset.colormap; n.props[k] = { ref: "", map: { on: "ok", off: "dim" }, default: "muted" }; });
+  if (b.dataset.toggleTpl) return change(() => { const k = b.dataset.toggleTpl; const v0 = n.props[k] || ""; n.props[k] = String(v0).includes("{{") ? "" : `{{ states('${String(v0).split("@")[0] || "sensor.example"}') }}`; });
+  if (b.hasAttribute("data-cadd")) return change(() => (n.props.colors = n.props.colors || []).push({ op: ">", value: "", color: "warn" }));
+  if (b.dataset.cdel) return change(() => n.props.colors.splice(+b.dataset.cdel, 1));
+  if (b.hasAttribute("data-cond-clear")) return change(() => delete n.props.show_if);
+  const a = b.dataset.act; if (!a) return;
+  if (a === "del") return removeNode(n.id);
+  if (a === "dup") return change(() => { const p = findParent(n.id, v.root); if (!p) return; const c = cloneNode(n); p.children.splice(p.children.indexOf(n) + 1, 0, c); sel.node = c.id; });
+  if (a === "up" || a === "down") return change(() => { const p = findParent(n.id, v.root); if (!p) return; const i = p.children.indexOf(n), j = a === "up" ? i - 1 : i + 1; if (j < 0 || j >= p.children.length) return; p.children.splice(i, 1); p.children.splice(j, 0, n); });
+  if (a === "wrap") return change(() => { const p = findParent(n.id, v.root); const c = N("card", { title: "Card" }, [n]); if (p) p.children.splice(p.children.indexOf(n), 1, c); else v.root = c; sel.node = c.id; });
+  if (a === "addtab") return change(() => { const t = N("tab", { title: "Tab " + (n.children.length + 1) }); n.children.push(t); sel.node = t.id; });
+  if (a === "previtem" || a === "nextitem") { const k = (n._items || []).length || 1; pv.item[n.id] = ((pv.item[n.id] || 0) + (a === "nextitem" ? 1 : k - 1)) % k; schedulePreview(0); refreshResults(n); return; }
+  if (a === "delscreen") { if (cfg.screens.length < 2) return toast("Keep at least one screen."); return change(() => { cfg.screens = cfg.screens.filter(x => x !== s); sel = { screen: cfg.screens[0].id, detail: null, node: null }; }); }
+  if (a === "dupscreen") return change(() => { const c = JSON.parse(JSON.stringify(s)); c.id = "s-" + Date.now().toString(36); c.title += " copy"; walkN(c.root, x => x.id = nid()); (c.details || []).forEach(d => walkN(d.root, x => x.id = nid())); cfg.screens.splice(cfg.screens.indexOf(s) + 1, 0, c); sel = { screen: c.id, detail: null, node: null }; });
+  if (a === "deldetail") return change(() => { s.details = s.details.filter(d => d.id !== sel.detail); walkN(s.root, x => { if (x.props && x.props.link === sel.detail) x.props.link = ""; }); sel.detail = null; });
+  if (a === "dupdetail") return change(() => { const d = JSON.parse(JSON.stringify(v)); d.id = s.id + "-d" + (s.details.length + 1) + Date.now() % 100; d.title += " copy"; walkN(d.root, x => x.id = nid()); s.details.push(d); sel.detail = d.id; });
+});
+/* tabs: selecting a tab (or anything inside it) previews that tab */
+function syncTabFromSelection() { const n = cur(); if (!n) return; const chain = [n, ...ancestors(n.id)];
+  for (let i = 0; i < chain.length - 1; i++) if (chain[i].type === "tab" && chain[i + 1].type === "tabs") pv.tab[chain[i + 1].id] = chain[i + 1].children.indexOf(chain[i]); }
+/* RackView data picker (the data model the factory screens use) */
+let MODEL = [];
+async function loadModel() { try { MODEL = await api("/api/model"); } catch (e) { MODEL = []; } return MODEL; }
+function modelPicker(pick) {
+  const draw = q => MODEL.filter(m => !q || m.path.toLowerCase().includes(q)).slice(0, 400).map(m =>
+    `<div class="mrow" data-mpath="${esc(m.path)}"><span class="mono">$${esc(m.path)}</span><small>${esc(m.value)}</small></div>`).join("") || `<p class="hint">Nothing matches.</p>`;
+  modal(`<div style="display:flex;gap:8px;align-items:center"><b style="flex:1">RackView data</b><button class="btn small" data-close>Close</button></div>
+    <p class="hint" style="margin:4px 0">Values RackView computes from HA, pings, NTP and its add-ons. Names ending in color hold a colour name for that value.</p>
+    <input type="search" id="mq" placeholder="Search, e.g. ups or servers.0" autofocus><div class="mlist" id="mlist">${draw("")}</div>`, m => {
+    m.querySelector("#mq").oninput = e => m.querySelector("#mlist").innerHTML = draw(e.target.value.toLowerCase());
+    m.querySelector("#mlist").onclick = e => { const r = e.target.closest("[data-mpath]"); if (r) { closeModal(); pick(r.dataset.mpath); } };
+  });
+  if (!MODEL.length) loadModel().then(() => { const l = document.getElementById("mlist"); if (l) l.innerHTML = draw(""); });
+}
+const PALETTE = { ok: "#3fb950", warn: "#d29922", crit: "#f85149", info: "#58a6ff", dim: "#484f58", muted: "#8b949e", text: "#e6edf3", orange: "#ff8c28", teal: "#00d2b4", purple: "#b078ff", sand: "#f0dcc8", bg: "#0d1117", card: "#161b22", card2: "#1e242d", line: "#30363d" };
+function swatchOf(v) { if (!v || typeof v !== "string") return "transparent"; if (v.startsWith("#")) return v; if (v === "accent") return screen().color; return PALETTE[v] || "repeating-linear-gradient(45deg,#888 0 3px,transparent 3px 6px)"; }
+
+/* entity picker */
+let pickEl = null;
+function openPicker(input) {
+  closePicker(); const q = input.value.toLowerCase().split("@")[0];
+  if (q.startsWith("@") || q.includes("{{")) return;
+  const list = ENTS.filter(e => !q || e.id.includes(q) || (e.name || "").toLowerCase().includes(q)).slice(0, 60);
+  pickEl = document.createElement("div"); pickEl.className = "menu";
+  pickEl.innerHTML = list.map(e => `<div data-eid="${esc(e.id)}"><span><span class="eid">${esc(e.id)}</span><br><small>${esc(e.name)}</small></span><small>${esc(String(e.state).slice(0, 18))} ${esc(e.unit)}</small></div>`).join("") || `<div><small>No matching entities</small></div>`;
+  input.parentElement.appendChild(pickEl);
+  pickEl.addEventListener("mousedown", ev => { const d = ev.target.closest("[data-eid]"); if (!d) return; ev.preventDefault(); const n = cur();
+    if (input.dataset.ref) change(() => { n.props[input.dataset.ref] = d.dataset.eid; if (n.props.label === undefined || n.props.label === "" || /^(New tile|Value|Bar|History|Brightness)$/.test(n.props.label)) if (TYPES[n.type].fields.some(f => f.key === "label")) n.props.label = ENT[d.dataset.eid].name; });
+    else change(() => (n.props[input.dataset.refs] = n.props[input.dataset.refs] || []).push(d.dataset.eid));
+  });
+}
+function closePicker() { if (pickEl) { pickEl.remove(); pickEl = null; } }
+insp.addEventListener("focusin", e => { if (e.target.dataset.ref || e.target.dataset.refs) openPicker(e.target); });
+insp.addEventListener("focusout", e => { if (e.target.dataset.ref || e.target.dataset.refs) setTimeout(closePicker, 150); });
+
+/* ============================================================ alerts + settings */
+function renderAlerts() {
+  const el = document.getElementById("view-alerts");
+  const pages = s => cfg.screens.map(x => `<option value="${esc(x.id)}" ${s === x.id ? "selected" : ""}>${esc(x.title)}</option>`).join("");
+  el.innerHTML = `<h1>Alerts</h1><p class="lead">These add to RackView's built-in alerts. An alert lights the middle button, appears on Overview, marks its screen's dot, and a new critical one wakes the screen and pulses red until silenced.</p>
+    <div class="tblwrap"><table class="tbl"><thead><tr><th>Message</th><th>Value</th><th>When</th><th>Severity</th><th>Screen</th><th></th></tr></thead><tbody>
+    ${(cfg.alerts || []).map((a, i) => `<tr><td><input data-ai="${i}" data-ak="text" value="${esc(a.text)}"></td><td><input class="mono" data-ai="${i}" data-ak="ref" list="entlist" value="${esc(a.ref || a.entity || "")}" placeholder="entity, entity@attr or {{ template }}"></td>
+      <td style="white-space:nowrap"><select data-ai="${i}" data-ak="op" style="width:auto">${OPS.map(([o, l]) => `<option value="${o}" ${a.op === o ? "selected" : ""}>${l}</option>`).join("")}</select> <input data-ai="${i}" data-ak="value" value="${esc(a.value)}" style="width:90px"></td>
+      <td><select data-ai="${i}" data-ak="severity"><option value="warn" ${a.severity !== "crit" ? "selected" : ""}>Warning</option><option value="crit" ${a.severity === "crit" ? "selected" : ""}>Critical</option></select></td>
+      <td><select data-ai="${i}" data-ak="page">${pages(a.page)}</select></td><td><button class="btn small danger" data-adel="${i}">Remove</button></td></tr>`).join("")}
+    </tbody></table></div><datalist id="entlist">${ENTS.slice(0, 3000).map(e => `<option value="${esc(e.id)}">`).join("")}</datalist>
+    <p><button class="btn" id="addalert">+ Add alert</button></p>
+    <div class="box"><h3>Alerts from Home Assistant labels</h3><p class="lead" style="margin:0">Any binary sensor in HA carrying this label raises a warning while it is on.</p>
+      <div class="field"><label for="alabel">HA label</label><input type="text" id="alabel" class="mono" value="${esc(cfg.alertLabel || "")}" style="max-width:260px"></div></div>`;
+}
+document.getElementById("view-alerts").addEventListener("change", e => { const t = e.target;
+  if (t.dataset.ai) change(() => { const a = cfg.alerts[+t.dataset.ai]; a[t.dataset.ak] = t.value; if (t.dataset.ak === "ref") delete a.entity; });
+  if (t.id === "alabel") change(() => cfg.alertLabel = t.value); });
+document.getElementById("view-alerts").addEventListener("click", e => {
+  if (e.target.id === "addalert") change(() => (cfg.alerts = cfg.alerts || []).push({ ref: "", op: ">", value: "", severity: "warn", page: cfg.screens[0].id, text: "New alert" }));
+  const d = e.target.closest("[data-adel]"); if (d) change(() => cfg.alerts.splice(+d.dataset.adel, 1)); });
+let settings = null;
+async function renderSettings() {
+  const el = document.getElementById("view-settings");
+  if (!settings) { try { settings = await api("/api/settings"); } catch (e) { el.innerHTML = `<p>Couldn't load settings: ${esc(e.message)}</p>`; return; } }
+  const s = settings, num = (k, l) => `<div class="field"><label for="set-${k}">${l}</label><input type="number" id="set-${k}" data-set="${k}" value="${esc(s[k])}"></div>`;
+  el.innerHTML = `<h1>Settings</h1><p class="lead">Saving settings restarts RackView (about 5 seconds). Home Assistant address and token live in the Pi's config file.</p><div class="cards">
+    <div class="box"><h3>Buttons</h3><div class="field"><label for="set-rail_side">Buttons are on the</label><select id="set-rail_side" data-set="rail_side"><option value="right" ${s.rail_side !== "left" ? "selected" : ""}>Right of the screen</option><option value="left" ${s.rail_side === "left" ? "selected" : ""}>Left of the screen</option></select></div>${num("long_press", "Hold time for “hold” (seconds)")}</div>
+    <div class="box"><h3>Door and sleep</h3>${num("door_sleep_delay", "Sleep after the door closes (s)")}${num("door_closed_idle", "Door closed: sleep after touch (s)")}${num("screen_off_after", "Door open: sleep when idle (s)")}${num("home_after", "Return to the first screen after (s idle)")}</div>
+    <div class="box"><h3>Rack door (WLED)</h3><div class="field"><label for="set-wled_host">WLED controller</label><input type="text" id="set-wled_host" data-set="wled_host" value="${esc(s.wled_host)}"></div>${num("door_open_preset", "Preset when the door opens")}${num("door_closed_preset", "Preset when the door closes")}</div>
+    <div class="box"><h3>Time</h3><div class="field"><label for="set-time_server">GPS / NTP server</label><input type="text" id="set-time_server" data-set="time_server" value="${esc(s.time_server)}"></div></div>
+    <div class="box"><h3>Publish rack data to Home Assistant</h3><p class="hint" style="margin:0">Rack door, pings, clock offset, screen and Port Hunt become HA entities (device “RackViewer”). Use a non-admin HA user; the Mosquitto add-on accepts HA logins.</p>
+      <div class="field"><label for="set-mqtt_user">MQTT user</label><input type="text" id="set-mqtt_user" data-set="mqtt_user" value="${esc(s.mqtt_user || "")}" autocomplete="off"></div>
+      <div class="field"><label for="set-mqtt_password">MQTT password</label><input type="password" id="set-mqtt_password" data-set="mqtt_password" placeholder="${s.mqtt_password_set ? "saved · type to replace" : "not set"}" autocomplete="new-password"></div>
+      <div class="field"><label for="set-mqtt_host">Broker (blank = Home Assistant's address)</label><input type="text" id="set-mqtt_host" data-set="mqtt_host" value="${esc(s.mqtt_host || "")}"></div></div></div>
+    <p><button class="btn primary" id="savesettings">Save settings and restart</button></p>
+    <h1 style="margin-top:22px">Backup</h1><p class="lead">Configuration is backed up on every save: every screen as layout data, alert rules, site settings and the Pi setup. The app code lives in its own repository; the backup records which version this display runs. Passwords and the HA token are never included.</p>
+    <div class="cards" id="backupcards"><div class="box"><p class="hint">Loading…</p></div></div>`;
+  renderBackup();
+}
+
+/* ============================================================ backup */
+let BK = null, bkTimer = null;
+const when = t => { if (!t) return "never"; const d = new Date(t), s = (Date.now() - d) / 1000;
+  const ago = s < 60 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago";
+  return `${d.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })} · ${ago}`; };
+async function renderBackup() {
+  const el = document.getElementById("backupcards"); if (!el) return;
+  try { BK = await api("/api/backup"); } catch (e) { el.innerHTML = `<div class="box"><p>Couldn't load backups: ${esc(e.message)}</p></div>`; return; }
+  const g = BK.git, gstate = !g.url ? `<span class="dot"></span><span>Not set up.</span>`
+    : g.busy ? `<span class="dot"></span><span>Backing up…</span>`
+    : g.last_error ? `<span class="dot bad"></span><span><b>Last backup failed:</b> ${esc(g.last_error)}${g.last_ok ? `<br><small class="hint">Last good backup ${esc(when(g.last_ok))}</small>` : ""}</span>`
+    : g.last_ok ? `<span class="dot ok"></span><span>Last backup ${esc(when(g.last_ok))} · commit ${esc(g.last_commit || "")}</span>`
+    : `<span class="dot"></span><span>Waiting for the first backup…</span>`;
+  const c = BK.code || {};
+  const codeLine = !c.commit ? `<span class="dot bad"></span><span><b>Code version unknown:</b> ${esc(c.note || "")}</span>`
+    : c.clean ? `<span class="dot ok"></span><span>Code: <span class="mono">${esc((c.repo || "").replace(/^https:\/\/github.com\//, "").replace(/\.git$/, ""))} @ ${esc(c.short)}</span> · unchanged</span>`
+    : `<span class="dot bad"></span><span><b>Code has local changes</b> not in <span class="mono">${esc(c.short)}</span> (${esc((c.changed || []).join(", "))}). They are saved as code.patch in the backup.</span>`;
+  el.innerHTML = `
+  <div class="box" style="grid-column:1/-1"><div class="bkstate">${codeLine}</div></div>
+  <div class="box"><h3>Version history on the Pi</h3><p class="hint" style="margin:0">The last ${BK.keep} saves. Restoring one is itself saved, so you can go back again.</p>
+    <div class="vlist">${BK.history.map((v, i) => `<div class="v"><span class="when">${esc(v.reason || "Saved")}${i === 0 ? " <b>(current)</b>" : ""}<small>${esc(when(v.time))} · ${v.screens} screens</small></span>${i ? `<button class="btn small" data-vrestore="${esc(v.id)}">Restore…</button>` : ""}</div>`).join("") || `<div class="v hint">No versions yet.</div>`}</div></div>
+  <div class="box"><h3>Backup file</h3><p class="hint" style="margin:0">The full backup is everything to rebuild this display on a fresh Pi: screens, settings, Pi setup and the code version, with <code>restore.sh</code>.</p>
+    <div class="btnrow"><a class="btn" href="/api/backup/download" download>Download full backup (.tar.gz)</a><a class="btn" href="/api/backup/download?format=json" download>Screens + settings only (.json)</a><button class="btn" id="bkupload">Restore from file…</button></div>
+    <input type="file" id="bkfile" accept=".gz,.tgz,.json,application/gzip,application/json" hidden></div>
+  <div class="box"><h3>Git backup (private repository)</h3>
+    <div class="bkstate">${gstate}</div><p class="hint" style="margin:0">Pushes the same configuration on every save; its README explains how to rebuild.</p>
+    <div class="field"><label for="bkurl">Repository SSH address</label><input type="text" id="bkurl" placeholder="git@github.com:you/rackview-config.git" value="${esc(g.url || "")}" autocomplete="off"></div>
+    <div class="btnrow"><button class="btn primary" id="bkseturl">${g.url ? "Update" : "Set up"}</button>${g.url ? `<button class="btn" id="bkpush">Back up now</button><button class="btn" id="bkgitlog">Restore from git…</button><button class="btn danger" id="bkoff">Turn off</button>` : ""}</div>
+    ${g.pubkey ? `<details ${g.last_ok ? "" : "open"}><summary class="hint">Deploy key (add once in GitHub)</summary><p class="hint">In GitHub: the repository → Settings → Deploy keys → Add deploy key. Paste this, tick <b>Allow write access</b>, save. Then press “Back up now”.</p><div class="keybox" id="bkkey">${esc(g.pubkey)}</div><button class="btn small" id="bkcopykey" style="margin-top:6px">Copy key</button></details>` : `<p class="hint" style="margin:0">Create an empty <b>private</b> repository first (no README). RackView makes its own key; it can only reach that one repository.</p>`}</div>`;
+  clearTimeout(bkTimer); if (g.busy) bkTimer = setTimeout(renderBackup, 2000);
+}
+function restoreDialog(title, detail, go) {
+  modal(`<b>${esc(title)}</b><p class="hint">${detail}</p>
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rs-screens" checked> Screens and alert rules</label>
+    <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="rs-config"> Site settings (restarts RackView)</label>
+    ${dirty ? `<p class="hint" style="color:var(--danger)">You have unsaved changes in the builder; they will be lost.</p>` : ""}
+    <div class="btnrow" style="justify-content:flex-end"><button class="btn" data-close>Cancel</button><button class="btn primary" id="rs-go">Restore</button></div>`, m => {
+    m.querySelector("#rs-go").onclick = async () => {
+      const parts = ["screens", "config"].filter(p => m.querySelector("#rs-" + p).checked);
+      if (!parts.length) return toast("Pick what to restore");
+      try { const r = await go(parts); closeModal(); setDirty(false); toast(r.restarting ? "Restored · RackView is restarting" : "Restored · the display is updated");
+        setTimeout(() => location.reload(), r.restarting ? 6000 : 800); } catch (e) { toast("Couldn't restore: " + e.message); } }; });
+}
+document.getElementById("view-settings").addEventListener("click", async e => {
+  const t = e.target, post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body) });
+  if (t.dataset.vrestore) { const v = BK.history.find(x => x.id === t.dataset.vrestore);
+    restoreDialog("Restore this version?", `${esc(v.reason || "Saved")} · ${esc(when(v.time))} · ${v.screens} screens`, parts => post("/api/backup/restore", { id: v.id, parts })); }
+  if (t.id === "bkupload") document.getElementById("bkfile").click();
+  if (t.id === "bkcopykey") navigator.clipboard.writeText(BK.git.pubkey).then(() => toast("Key copied"), () => toast("Select the key and press Ctrl+C"));
+  if (t.id === "bkseturl" || t.id === "bkoff") { const url = t.id === "bkoff" ? "" : document.getElementById("bkurl").value.trim();
+    if (t.id === "bkseturl" && !url) return toast("Enter the repository address");
+    try { await api("/api/backup/git", { method: "PUT", body: JSON.stringify({ url }) }); toast(url ? "Saved · copy the deploy key into GitHub" : "Git backup turned off"); } catch (err) { toast(err.message); }
+    renderBackup(); }
+  if (t.id === "bkpush") { t.disabled = true; t.textContent = "Backing up…";
+    try { await post("/api/backup/push", {}); toast("Backed up to git"); } catch (err) { toast("Backup failed: " + err.message); } renderBackup(); }
+  if (t.id === "bkgitlog") { t.disabled = true;
+    let log; try { log = await api("/api/backup/git/log"); } catch (err) { t.disabled = false; return toast("Couldn't read git: " + err.message); }
+    t.disabled = false;
+    modal(`<div style="display:flex;align-items:center"><b style="flex:1">Restore from git</b><button class="btn small" data-close>Close</button></div>
+      <div class="vlist">${log.map(c => `<div class="v"><span class="when">${esc(c.msg)}<small>${esc(when(c.time))} · ${esc(c.sha)}</small></span><button class="btn small" data-gsha="${esc(c.sha)}">Restore…</button></div>`).join("") || `<div class="v hint">No backups in the repository yet.</div>`}</div>`, m => {
+      m.querySelectorAll("[data-gsha]").forEach(b => b.onclick = () => { const c = log.find(x => x.sha === b.dataset.gsha);
+        restoreDialog("Restore this git backup?", `${esc(c.msg)} · ${esc(when(c.time))}`, parts => post("/api/backup/git/restore", { sha: c.sha, parts })); }); }); }
+});
+document.getElementById("view-settings").addEventListener("change", async e => { if (e.target.id !== "bkfile" || !e.target.files[0]) return;
+  const buf = new Uint8Array(await e.target.files[0].arrayBuffer()); e.target.value = "";
+  let bin = ""; for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  const file = btoa(bin);
+  let info; try { info = await api("/api/backup/inspect", { method: "POST", body: JSON.stringify({ file }) }); } catch (err) { return toast(err.message); }
+  restoreDialog("Restore from this file?", `Made ${esc(when(info.created))} on ${esc(info.host || "?")} · ${info.screens} screens. App code in the file is not installed here; that is what rebuild.sh is for.`,
+    parts => api("/api/backup/upload", { method: "POST", body: JSON.stringify({ file, parts }) }));
+});
+document.getElementById("view-settings").addEventListener("change", e => { const t = e.target; if (t.dataset.set) settings[t.dataset.set] = t.type === "number" ? +t.value : t.value; });
+document.getElementById("view-settings").addEventListener("click", async e => { if (e.target.id !== "savesettings") return;
+  try { await api("/api/settings", { method: "PUT", body: JSON.stringify(settings) }); toast("Saved · RackView is restarting"); } catch (err) { toast("Couldn't save: " + err.message); } });
+
+/* ============================================================ top bar, modal, toast */
+document.querySelectorAll(".navtabs button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".navtabs button").forEach(x => x.setAttribute("aria-selected", x === b));
+  ["screens", "alerts", "settings"].forEach(t => document.getElementById("view-" + t).hidden = t !== b.dataset.tab);
+  renderAll(); if (b.dataset.tab === "settings") renderSettings(); });
+document.getElementById("undo").onclick = () => { if (!hist.length) return; fut.push(JSON.stringify(cfg)); cfg = JSON.parse(hist.pop()); fixSel(); setDirty(true); renderAll(); };
+document.getElementById("redo").onclick = () => { if (!fut.length) return; hist.push(JSON.stringify(cfg)); cfg = JSON.parse(fut.pop()); fixSel(); setDirty(true); renderAll(); };
+document.addEventListener("keydown", e => {
+  const typing = /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !typing) { e.preventDefault(); document.getElementById(e.shiftKey ? "redo" : "undo").click(); }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); save(); }
+  if ((e.key === "Delete") && sel.node && !typing) { e.preventDefault(); removeNode(sel.node); }
+});
+function clean(o) { return JSON.parse(JSON.stringify(o, (k, v) => k.startsWith("_") ? undefined : v)); }
+async function save() {
+  try { await api("/api/config", { method: "PUT", body: JSON.stringify(clean(cfg)) }); setDirty(false); toast("Saved · the display is updated"); }
+  catch (e) { toast("Couldn't save: " + e.message); }
+}
+document.getElementById("save").onclick = save;
+document.getElementById("showdev").onclick = async () => {
+  if (dirty) await save();
+  try { await api("/api/show", { method: "POST", body: JSON.stringify({ screen: screen().id, detail: sel.detail }) }); toast(`The display is showing “${view().title}”`); } catch (e) { toast(e.message); } };
+document.getElementById("showjson").onclick = () => modal(`<div style="display:flex;gap:8px;align-items:center"><b style="flex:1">Screen config (JSON)</b><button class="btn small" id="cpy">Copy</button><button class="btn small" data-close>Close</button></div><pre id="jsonpre">${esc(JSON.stringify(clean(cfg), null, 1))}</pre>`, m => {
+  m.querySelector("#cpy").onclick = () => navigator.clipboard.writeText(m.querySelector("#jsonpre").textContent).then(() => toast("Copied"), () => toast("Select the text and press Ctrl+C")); });
+window.addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+function modal(html, init) { const m = document.getElementById("modal-root"); m.innerHTML = `<div class="modal" role="dialog"><div class="card">${html}</div></div>`;
+  m.querySelectorAll("[data-close]").forEach(b => b.onclick = closeModal); m.querySelector(".modal").onclick = ev => { if (ev.target.classList.contains("modal")) closeModal(); }; if (init) init(m); }
+function closeModal() { document.getElementById("modal-root").innerHTML = ""; }
+let toastT = null;
+function toast(msg) { let t = document.querySelector(".toast"); if (!t) { t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); }
+  t.textContent = msg; clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 2800); }
+
+function renderAll(preview) {
+  fixSel(); syncTabFromSelection();
+  if (!document.getElementById("view-screens").hidden) { renderTree(); renderPalette(); renderCrumbs(); renderInspector();
+    if (preview === false) frame.querySelectorAll("[data-hot]").forEach(h => h.classList.toggle("sel", h.dataset.hot === sel.node)); else schedulePreview(); }
+  if (!document.getElementById("view-alerts").hidden) renderAlerts();
+  document.getElementById("undo").disabled = !hist.length; document.getElementById("redo").disabled = !fut.length;
+}
+async function pollStatus() { try { const s = await api("/api/status"); document.getElementById("hadot").className = "dot " + (s.ha_ok ? "ok" : "bad");
+  document.getElementById("hatext").textContent = s.ha_ok ? `Display on “${(cfg.screens.find(x => x.id === s.page) || {}).title || s.page}”` : "Home Assistant not answering"; } catch (e) {} }
+
+(async function boot() {
+  try {
+    [cfg, ENTS, SOURCES] = await Promise.all([api("/api/config"), api("/api/entities"), api("/api/sources")]);
+  } catch (e) { if (e.message !== "login") document.getElementById("view-screens").innerHTML = `<div class="banner"><b>Can't reach RackView.</b><p>${esc(e.message)}</p></div>`; return; }
+  ENTS.forEach(e => ENT[e.id] = e);
+  loadModel();
+  document.body.insertAdjacentHTML("beforeend", `<datalist id="colorwords">${COLOR_WORDS.map(c => `<option value="${c}">`).join("")}</datalist>`);
+  cfg.screens.forEach(s => { s.details = s.details || []; });
+  sel.screen = cfg.screens[0].id;
+  fit(); renderAll(); pollStatus(); setInterval(pollStatus, 10000);
+  if (location.hash === "#selftest") selftest();
+  if (location.hash === "#settings" || location.hash === "#backup") document.querySelector(".navtabs [data-tab=settings]").click();
+})();
+
+/* ============================================================ self-test (run by opening /#selftest) */
+async function selftest() {
+  const log = (...a) => console.log("SELFTEST", ...a);
+  try {
+    log("screens", cfg.screens.map(s => s.id).join(","));
+    sel = { screen: "t-cooling", detail: null, node: null }; renderAll(); await new Promise(r => setTimeout(r, 1500));
+    log("preview rects", rects.length, "img", !!frame.querySelector("img"));
+    const card = findNode("c2", screen().root); sel.node = "c2"; renderAll(false);
+    log("inspector has detail field", !!insp.querySelector("select[data-k=link]"));
+    addNode("pill"); const added = cur(); log("added", added && added.type, "under", labelOf(findParent(added.id, view().root)));
+    const inp = insp.querySelector("input[data-ref=entity]"); inp.value = "sensor.syncserver_s250_status"; inp.dispatchEvent(new Event("input", { bubbles: true }));
+    await new Promise(r => setTimeout(r, 900)); log("ref result", (insp.querySelector(".result") || {}).textContent);
+    moveNode(added.id, "c3", "before"); log("moved before c3:", findParent(added.id, view().root).children.map(c => c.type).join(","));
+    document.getElementById("undo").click(); document.getElementById("undo").click(); log("after undo x2 has pill:", !!findNode(added.id, screen().root));
+    sel.detail = "fan-detail"; sel.node = null; renderAll(); await new Promise(r => setTimeout(r, 1500)); log("detail preview rects", rects.length);
+    const t = await api("/api/template", { method: "POST", body: JSON.stringify({ template: "{{ 1 + 1 }}" }) }); log("template", t.result);
+    const shown = () => ["screens", "alerts", "settings"].filter(v => getComputedStyle(document.getElementById("view-" + v)).display !== "none").join(",");
+    for (const tab of ["alerts", "settings", "screens"]) {
+      document.querySelector(`.navtabs [data-tab=${tab}]`).click(); await new Promise(r => setTimeout(r, 400));
+      log(`tab ${tab}: visible views = ${shown()}`, shown() === tab ? "OK" : "WRONG");
+    }
+    const ov = cfg.screens.find(x => x.root && x.root.type === "free");
+    if (ov) { sel = { screen: ov.id, detail: null, node: null }; renderAll(); await new Promise(r => setTimeout(r, 1500));
+      const lab = (() => { let h = null; walkN(ov.root, x => { if (!h && x.type === "label") h = x; }); return h; })();
+      sel.node = lab.id; renderAll(false);
+      log("free layout: label has x field", !!insp.querySelector("input[data-k=x]"), "colour field", !!insp.querySelector("input[list=colorwords]"), "insert-value chip", !!insp.querySelector("[data-modelins]"));
+      await loadModel(); log("model paths", MODEL.length, "has $ups.batt", MODEL.some(m => m.path === "ups.batt"));
+      const t = await api("/api/text", { method: "POST", body: JSON.stringify({ text: "UPS ${$ups.batt|u:%}" }) }); log("text api", t.text); }
+    document.querySelector(`.navtabs [data-tab=settings]`).click(); await new Promise(r => setTimeout(r, 1500));
+    log("backup versions", BK && BK.history.length, "download links", document.querySelectorAll("a[href^='/api/backup/download']").length);
+    document.querySelector(`.navtabs [data-tab=screens]`).click();
+    log("DONE ok");
+  } catch (e) { log("FAILED", e.message, e.stack); }
+}
+</script>
+</body>
+</html>
