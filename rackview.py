@@ -122,6 +122,7 @@ CONF_DIR = os.path.dirname(os.path.abspath(CONFIG_FILE))
 OUTAGE_SUGGEST_MIN = cfg("outage_suggest_minutes", 15)     # runtime below which the outage screen says "shut down now"
 OUTAGE_ORDER = cfg("outage_order", [])                     # iDRAC server ids, shut down first to last
 MAINT_COLOR = (150, 90, 255)
+NEWDEV_BULK = 8                     # this many unseen devices in one update = the client list grew
 HA_SYS = ("disk_free", "disk_use", "load_1m", "memory_use_percent", "processor_use", "processor_temperature")
 GPS_HEALTH = {0: "Receiver down", 1: "Unknown mode", 2: "Acquiring signal", 3: "Bad geometry",
               4: "Propagate mode", 5: "2D solution", 6: "3D solution", 7: "Position hold", 8: "Time valid"}
@@ -1618,9 +1619,15 @@ class UI:
                     self._save_json("known_devices.json", self.known)
                     self.history.event("devices", f"Learned {len(ncs)} devices on the network", 0)
                 fresh = [c for c in ncs if c["mac"] not in self.known]
+                # many at once means the client list grew (e.g. the add-on now reports every client, not one
+                # switch): learn them quietly instead of raising an alert per device
+                bulk = len(fresh) >= NEWDEV_BULK
                 for c in fresh:
-                    self.known[c["mac"]] = {"name": c["name"], "first": now, "ack": False}
-                    self.history.event("device", f"New device: {c['name']}", 1, f"{c.get('ip') or ''} · {c.get('at') or ''}")
+                    self.known[c["mac"]] = {"name": c["name"], "first": now, "ack": bulk}
+                    if not bulk:
+                        self.history.event("device", f"New device: {c['name']}", 1, f"{c.get('ip') or ''} · {c.get('at') or ''}")
+                if bulk:
+                    self.history.event("devices", f"Learned {len(fresh)} more devices", 0, "the client list grew; no alerts raised")
                 if fresh:
                     self._save_json("known_devices.json", self.known)
         byk = {c["mac"]: c for c in ncs}
