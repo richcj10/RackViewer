@@ -127,10 +127,11 @@ class Backup:
         self.lock = threading.Lock()
         self.wake = threading.Event()
         os.makedirs(self.hist_dir, exist_ok=True)
-        self.snapshot("First backup" if not self.history() else "Changed while RackView was off")
+        self.message = None
+        changed = self.snapshot("First backup" if not self.history() else "Changed while RackView was off")
         threading.Thread(target=self._worker, daemon=True).start()
-        if self.git_url():
-            self.request_push()            # catches edits made while RackView was off
+        if self.git_url():                 # catches edits made while RackView was off and code updates
+            self.request_push(None if changed else f"Started with code {self.code_info().get('short') or '?'}")
 
     # ------------------------------------------------------------ bundle
     def bundle(self):
@@ -303,7 +304,8 @@ class Backup:
         with open(self.key + ".pub") as f:
             return f.read().strip()
 
-    def request_push(self):
+    def request_push(self, message=None):
+        self.message = message
         self.wake.set()
 
     def _set(self, **kw):
@@ -379,7 +381,8 @@ class Backup:
             self.wake.wait()
             time.sleep(3)                  # several saves in a row become one commit
             self.wake.clear()
-            reason = (self.history() or [{}])[0].get("reason") or "Backup"
+            reason = self.message or (self.history() or [{}])[0].get("reason") or "Backup"
+            self.message = None
             self.status["busy"] = True
             try:
                 self.push(reason)
