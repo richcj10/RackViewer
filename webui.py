@@ -20,7 +20,7 @@ from flask import Flask, Response, jsonify, redirect, request, send_file, sessio
 BASE = os.path.dirname(os.path.abspath(__file__))
 PASS_FILE = os.path.expanduser("~/.config/rackview/web_password")
 SECRET_FILE = os.path.expanduser("~/.config/rackview/web_secret")
-SETTINGS_KEYS = ("rail_side", "door_sleep_delay", "door_closed_idle", "screen_off_after", "home_after",
+SETTINGS_KEYS = ("rail_side", "touch_buttons", "door_sleep_delay", "door_closed_idle", "screen_off_after", "home_after",
                  "long_press", "wled_host", "door_open_preset", "door_closed_preset", "time_server",
                  "mqtt_host", "mqtt_user")
 

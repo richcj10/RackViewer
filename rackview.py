@@ -70,6 +70,8 @@ DOOR_SLEEP_DELAY = cfg("door_sleep_delay", 60)    # seconds after the door close
 HOME_AFTER = cfg("home_after", 120)               # idle seconds before returning to Overview
 LONG_PRESS = cfg("long_press", 0.9)
 RAIL_SIDE = cfg("rail_side", "right")             # side of the screen the physical buttons are on
+# draw the rail as three on-screen buttons: "auto" = when no button board (AW9523) is found, or "on" / "off"
+TOUCH_BUTTONS = str(cfg("touch_buttons", "auto")).lower()
 ESSENTIAL_SERVERS = set(cfg("essential_servers", []))   # iDRAC server ids where powered-off = critical
 SERVER_NAMES = cfg("server_names", {})                  # iDRAC server id -> display name
 PING_HOSTS = [tuple(x) for x in cfg("ping_hosts", [   # (label, host or null = default gateway, critical-if-down)
@@ -1254,6 +1256,7 @@ class UI:
         self.cdetail = None        # (detail id, item) while a detail screen is open
         self.hist = {}             # ref -> deque[(t, value)] for history graphs
         self.web_q = _queue.Queue()
+        self.rail_down = None       # touch on the button rail: {"btn", "t0", "fired", "remote"}
         self.remote_q = _queue.Queue()  # touches from the live view: ("down" | "move" | "up", x, y)
         self.mirror = dict(seen=0.0, at=0.0, crc=None, frame=None, seq=0)   # latest JPEG of the screen
         self.mirror_cv = threading.Condition()
@@ -1856,6 +1859,19 @@ class UI:
         ps = m["page_sev"] if m else {}
         self.pg.draw.line(s, LINE, (x0 if RAIL_SIDE == "right" else x0 + RAIL_W - 1, 0),
                           (x0 if RAIL_SIDE == "right" else x0 + RAIL_W - 1, H))
+        touch = self.touch_buttons()
+        rd = self.rail_down
+        for zone in range(3):
+            zr = self.pg.Rect(x0 + 8, zone * H // 3 + 6, RAIL_W - 16, H // 3 - 12)
+            pressed = rd is not None and rd["btn"] == zone
+            if touch or pressed:
+                self.pg.draw.rect(s, LINE if pressed else CARD2, zr, border_radius=14)
+                if touch:
+                    self.pg.draw.rect(s, LINE, zr, 1, border_radius=14)
+            if pressed and not rd["fired"]:
+                k = min(1.0, (time.monotonic() - rd["t0"]) / LONG_PRESS)
+                if k > 0.15:                               # holding: show progress toward the long press
+                    self.pg.draw.rect(s, INFO, (zr.x + 10, zr.bottom - 8, int((zr.w - 20) * k), 3), border_radius=2)
         if self.dialog or self.help:
             d = self.dialog
             mid = "Close" if self.help else ("Hold: confirm" if d["hold"] else "Confirm")
@@ -2393,8 +2409,8 @@ class UI:
             y += 42
         self.T("Touch", 15, MUTED, (r.x + 14, y + 4))
         y += 30
-        for line in ["Tap a tile or server to open it; the right", "strip works like the buttons. Risky actions",
-                     "need a 1.5 s hold. Door closed = sleep."]:
+        for line in ["Tap a tile or server to open it. The side", "strip works like the buttons (hold it for a",
+                     "long press). Risky actions need a 1.5 s hold."]:
             self.T(line, 13, TEXT, (r.x + 14, y))
             y += 19
         # screen builder: address + password reset (needs someone at the rack)
@@ -2801,7 +2817,7 @@ class UI:
             return
         on_rail = x >= W - RAIL_W if RAIL_SIDE == "right" else x < RAIL_W
         if on_rail:
-            self.press("short", min(2, y * 3 // H), remote)
+            self.rail_down = dict(btn=min(2, y * 3 // H), t0=time.monotonic(), fired=False, remote=remote)
             return
         cx = x - (0 if RAIL_SIDE == "right" else RAIL_W)
         if not (self.dialog or self.help):
@@ -2815,6 +2831,19 @@ class UI:
                 fn()
                 break
 
+    def rail_tick(self, now):
+        rd = self.rail_down
+        if rd and not rd["fired"] and now - rd["t0"] >= LONG_PRESS:
+            rd["fired"] = True
+            self.press("long", rd["btn"], rd["remote"])
+
+    def touch_buttons(self):
+        if TOUCH_BUTTONS in ("on", "true", "1", "yes"):
+            return True
+        if TOUCH_BUTTONS in ("off", "false", "0", "no"):
+            return False
+        return getattr(self.panel, "aw", None) is None
+
     def touch_move(self, x, y):
         if self.active_drag:
             self.last_input = time.monotonic()
@@ -2823,6 +2852,9 @@ class UI:
 
     def touch_up(self, x, y):
         self.hold_start = None
+        rd, self.rail_down = self.rail_down, None
+        if rd and not rd["fired"]:
+            self.press("short", rd["btn"], rd["remote"])
         if self.active_drag:
             fn, dx = self.active_drag
             self.active_drag = None
@@ -2902,6 +2934,7 @@ class UI:
                     self._set_screen(False)
                 if idle > HOME_AFTER and self.page != 0:
                     self.page = 0
+            self.rail_tick(now)
             self.handle_web()
             self.check_door(now)
             self.track_ups_test()
@@ -2924,7 +2957,8 @@ class UI:
                 self.draw()
                 if self.mirror_active(now):
                     self.mirror_capture(now)
-            clock.tick(25 if self.dialog or self.hold_start or self.active_drag or self.hunt_active() else 10)
+            clock.tick(25 if self.dialog or self.hold_start or self.active_drag or self.rail_down or self.hunt_active()
+                       else 10)
 
 
 if __name__ == "__main__":

@@ -188,6 +188,7 @@ All site specifics live in `~/.config/rackview/config.json`; see
 | `time_server` | GPS / NTP server the Pi measures itself against |
 | `port_hunt_switch` | UIWLED switch name used by Port Hunt |
 | `rail_side` | side of the screen the physical buttons are on |
+| `touch_buttons` | `auto` (default): draw the side strip as three on-screen buttons when no AW9523 button board is found; `on` / `off` to force. The strip always works by touch: tap = press, hold = long press |
 | `web_port` | port of the screen builder (8088) |
 | `mqtt_user`, `mqtt_password`, `mqtt_host` | publish rack data (door, pings, clock offset, …) to HA over MQTT |
 | `backup_git_url` | private git repository for configuration backups (set in the builder) |
