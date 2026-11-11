@@ -227,20 +227,78 @@ network = screen("network", "Network", "#5a8cff", free(0, 0, 658, 420, [
     L("No switch data", 14, 266, 15, "muted", show_if=show("$switches", "is_empty")),
 ]), middle="reping")
 
-# ============================================================ Firewall (OPNsense Stats add-on)
+# ============================================================ Firewall (OPNsense Stats add-on) + details
 start("fw")
 V = "$opn.view."
 
 
-def top_list(title, path, y, h, rows, row_h=20):
-    return card(0, y, 320, h, [
-        L(title, 14, 8, 14, "muted"),
-        REP(path, 0, 30, 320, rows * row_h, [free(0, 0, None, row_h, [
-            BAR("@share", 14, row_h - 3, 292, 2, max=1, color="line"),
-            L("${@name}", 14, 0, 13, r=78),
-            L("${@count}", 0, 0, 13, "muted", align="right", r=14, w=64),
-        ])], max=rows, mode="all", columns=1, row_h=row_h, gap_y=0),
-    ])
+def back(title):
+    return [N("button", dict(pos(12, 10, 90, 32), label="‹ Back", action="back", color="muted", size=14, exact=True)),
+            L(title, 116, 14, 18, bold=True, w=400)]
+
+
+def count_rows(path, x, y, w, rows, row_h=20, size=13):
+    return REP(path, x, y, w, rows * row_h, [free(0, 0, None, row_h, [
+        BAR("@share", 0, row_h - 3, w - 14, 2, max=1, color="line"),
+        L("${@name}", 0, 0, size, r=78),
+        L("${@count}", 0, 0, size, "muted", align="right", r=14, w=64),
+    ])], max=rows, mode="all", columns=1, row_h=row_h, gap_y=0)
+
+
+fw_wan = {"id": "fw-wan", "title": "Interfaces", "root": card(0, 0, 658, 420, back("Interfaces & gateways") + [
+    REP(V + "ifaces", 10, 52, 638, 222, [free(0, 0, None, 74, [
+        BOX(0, 0, 638, 68, "card2", radius=10),
+        DOT("@color", 18, 18, 6),
+        L("${@name}", 32, 8, 17, bold=True, w=140),
+        L("${@ip}", 180, 8, 17, "@ip_color", bold=True, w=230),
+        L("${@gw}", 0, 10, 14, "muted", align="right", r=14, w=200),
+        L("${@dev} · ${@media} · ${@mac}", 32, 38, 13, "dim", w=390),
+        L("${@rates}", 0, 30, 14, align="right", r=14, w=200),
+        L("${@errors}", 0, 48, 12, "@err_color", align="right", r=14, w=200),
+    ])], mode="all", columns=1, row_h=74, gap_y=0),
+    L("Gateways", 14, 282, 15, "muted"),
+    REP(V + "gws", 10, 306, 638, 110, [free(0, 0, None, 52, [
+        BOX(0, 0, 638, 48, "card2", radius=10),
+        DOT("@color", 18, 16, 6),
+        L("${@name}", 32, 6, 16, bold=True, w=150),
+        L("${@status}", 32, 26, 12, "@color", w=150),
+        L("${@addr} · ${@monitor}", 180, 6, 13, "muted", w=260),
+        L("${@latency} ±${@jitter} · loss ${@loss}", 0, 16, 15, align="right", r=14, w=230),
+    ])], mode="all", columns=1, row_h=52, gap_y=0),
+])}
+
+fw_talk = {"id": "fw-talkers", "title": "Talkers", "root": card(0, 0, 658, 420, back("Top talkers") + [
+    L("${" + V + "updated}", 0, 18, 12, "dim", align="right", r=14, w=100),
+    L("LAN devices", 14, 52, 14, "muted"),
+    L("${" + V + "top_empty}", 14, 80, 14, "dim", w=380, show_if=show(V + "talkers", "is_empty")),
+    REP(V + "talkers", 10, 74, 400, 340, [free(0, 0, None, 42, [
+        L("${@name}", 4, 0, 15, r=150),
+        L("${@ip_full|or:} ${@vendor|or:}", 4, 20, 11, "dim", r=150),
+        L("↓${@down}", 0, 0, 14, align="right", r=4, w=140),
+        L("↑${@up}", 0, 19, 13, "muted", align="right", r=4, w=140),
+        BAR("@share", 4, 37, 386, 2, max=1, color="@color"),
+    ])], max=8, mode="all", columns=1, row_h=42, gap_y=0),
+    L("Remote hosts", 426, 52, 14, "muted"),
+    REP(V + "remote_all", 420, 74, 230, 340, [free(0, 0, None, 42, [
+        L("${@name}", 4, 0, 13, r=4),
+        L("${@ip|or:}", 4, 18, 11, "dim", w=110),
+        L("↓${@down} ↑${@up}", 0, 18, 11, "muted", align="right", r=8, w=130),
+    ])], max=8, mode="all", columns=1, row_h=42, gap_y=0),
+])}
+
+fw_dns = {"id": "fw-dns", "title": "DNS", "root": card(0, 0, 658, 420, back("DNS · Unbound") + [
+    REP(V + "dns_rows", 14, 56, 200, 240, [free(0, 0, None, 24, [
+        L("${@k}", 0, 0, 13, "muted", w=120), L("${@v}", 0, 0, 14, align="right", w=80, r=0),
+    ])], mode="all", columns=1, row_h=24, gap_y=0),
+    L("Top domains", 232, 56, 14, "muted"),
+    count_rows(V + "domains_all", 232, 80, 200, 8, 22, 12),
+    L("Top clients · 24 h", 450, 56, 14, "muted"),
+    count_rows(V + "clients_all", 450, 80, 200, 8, 22, 12),
+])}
+
+
+def top_list(title, path, y, h, rows, link):
+    return card(0, y, 320, h, [L(title, 14, 8, 14, "muted"), count_rows(path, 14, 30, 306, rows)], link=link)
 
 
 firewall = screen("firewall", "Firewall", "#ff6e46", free(0, 0, 658, 420, [
@@ -248,9 +306,9 @@ firewall = screen("firewall", "Firewall", "#ff6e46", free(0, 0, 658, 420, [
     L("Install / start the OPNsense Stats add-on", 0, 194, 14, "dim", align="center", w=658,
       show_if=show("$opn.present", "==", False)),
     free(0, 0, 658, 420, [
-        card(0, 0, 214, 136, [
-            L("WAN", 14, 10, 15, "muted"),
-            L("${" + V + "line} link", 0, 12, 12, "dim", align="right", r=14, w=110),
+        card(0, 0, 214, 160, [
+            L("WAN ›", 14, 10, 15, "muted"),
+            L("${" + V + "wan_ip}", 0, 11, 14, V + "wan_ip_color", bold=True, align="right", r=14, w=140),
             L("↓", 14, 34, 18, "info", bold=True),
             L("${" + V + "down}", 34, 30, 24, bold=True, r=14),
             BAR(V + "down_pct", 14, 62, 186, 4, max=100, color="info"),
@@ -259,39 +317,43 @@ firewall = screen("firewall", "Firewall", "#ff6e46", free(0, 0, 658, 420, [
             BAR(V + "up_pct", 14, 100, 186, 4, max=100, color="teal"),
             L("${" + V + "latency} ±${" + V + "jitter}", 14, 112, 13, "muted", r=80),
             L("loss ${" + V + "loss}", 0, 112, 13, V + "loss_color", align="right", r=14, w=80),
-        ]),
-        card(222, 0, 214, 136, [
-            L("DNS · Unbound", 14, 10, 15, "muted"),
+            L("LTE", 14, 134, 13, "muted"),
+            L("${" + V + "lte_ip} · ${" + V + "lte_gw}", 0, 134, 13, V + "lte_color", align="right", r=14, w=160),
+        ], link="fw-wan"),
+        card(222, 0, 214, 160, [
+            L("DNS · Unbound ›", 14, 10, 15, "muted"),
             L("${" + V + "qps} q/s", 14, 30, 24, bold=True, r=14),
             KV("Cache hits", "${" + V + "cache}", 14, 66, r=14, size=14),
             KV("Recursion", "${" + V + "recursion}", 14, 88, r=14, size=14),
             KV("Queries 24 h", "${" + V + "q24}", 14, 110, r=14, size=14),
-        ]),
-        card(444, 0, 214, 136, [
+            KV("Blocklist", "${" + V + "blocked}", 14, 132, r=14, size=14),
+        ], link="fw-dns"),
+        card(444, 0, 214, 160, [
             L("Packet filter", 14, 10, 15, "muted"),
             L("${" + V + "version}", 0, 12, 11, "dim", align="right", r=14, w=90),
             L("${" + V + "states} states", 14, 30, 22, bold=True, r=14),
             BAR(V + "states_pct", 14, 60, 186, 4, max=100, color="info"),
             KV("New states", "${" + V + "new_states}", 14, 70, r=14, size=14),
             KV("Rule matches", "${" + V + "matches}", 14, 92, r=14, size=14),
-            KV("Up", "${" + V + "uptime}", 14, 114, r=14, size=14),
+            KV("DHCP leases", "${" + V + "leases}", 14, 114, r=14, size=14),
+            KV("Up", "${" + V + "uptime}", 14, 136, r=14, size=14),
         ]),
-        card(0, 144, 330, 276, [
-            L("Top talkers · LAN", 14, 10, 15, "muted"),
+        card(0, 168, 330, 252, [
+            L("Top talkers · LAN ›", 14, 10, 15, "muted"),
             L("${" + V + "updated}", 0, 12, 11, "dim", align="right", r=14, w=90),
             L("${" + V + "top_empty}", 14, 44, 14, "dim", r=14, show_if=show(V + "talkers", "is_empty")),
-            REP(V + "talkers", 0, 34, 330, 238, [free(0, 0, None, 34, [
+            REP(V + "talkers", 0, 34, 330, 204, [free(0, 0, None, 34, [
                 L("${@name}", 14, 2, 14, r=150),
                 L("↓${@down}  ↑${@up}", 0, 3, 13, "muted", align="right", r=14, w=150),
                 BAR("@share", 14, 24, 302, 3, max=1, color="@color"),
-            ])], max=7, mode="all", columns=1, row_h=34, gap_y=0),
-        ]),
-        free(338, 144, 320, 276, [
-            top_list("Top DNS domains", V + "domains", 0, 134, 5),
-            top_list("Top DNS clients · 24 h", V + "clients", 142, 134, 5),
+            ])], max=6, mode="all", columns=1, row_h=34, gap_y=0),
+        ], link="fw-talkers"),
+        free(338, 168, 320, 252, [
+            top_list("Top DNS domains ›", V + "domains", 0, 122, 4, "fw-dns"),
+            top_list("Top DNS clients · 24 h ›", V + "clients", 130, 122, 4, "fw-dns"),
         ]),
     ], show_if=show("$opn.present", "==", True)),
-]))
+]), middle="details", details=[fw_wan, fw_talk, fw_dns])
 
 # ============================================================ Time
 start("tm")

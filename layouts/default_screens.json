@@ -1537,9 +1537,9 @@
    "title": "Firewall",
    "color": "#ff6e46",
    "enabled": true,
-   "middle": "home",
+   "middle": "details",
    "root": {
-    "id": "fw53",
+    "id": "fw117",
     "type": "free",
     "props": {
      "x": 0,
@@ -1549,7 +1549,7 @@
     },
     "children": [
      {
-      "id": "fw1",
+      "id": "fw61",
       "type": "label",
       "props": {
        "x": 0,
@@ -1567,7 +1567,7 @@
       }
      },
      {
-      "id": "fw2",
+      "id": "fw62",
       "type": "label",
       "props": {
        "x": 0,
@@ -1585,7 +1585,7 @@
       }
      },
      {
-      "id": "fw52",
+      "id": "fw116",
       "type": "free",
       "props": {
        "x": 0,
@@ -1600,43 +1600,45 @@
       },
       "children": [
        {
-        "id": "fw13",
+        "id": "fw75",
         "type": "free",
         "props": {
          "x": 0,
          "y": 0,
          "w": 214,
-         "h": 136,
-         "bg": "card"
+         "h": 160,
+         "bg": "card",
+         "link": "fw-wan"
         },
         "children": [
          {
-          "id": "fw3",
+          "id": "fw63",
           "type": "label",
           "props": {
            "x": 14,
            "y": 10,
-           "text": "WAN",
+           "text": "WAN ›",
            "size": 15,
            "color": "muted"
           }
          },
          {
-          "id": "fw4",
+          "id": "fw64",
           "type": "label",
           "props": {
            "x": 0,
-           "y": 12,
-           "w": 110,
+           "y": 11,
+           "w": 140,
            "r": 14,
-           "text": "${$opn.view.line} link",
-           "size": 12,
-           "color": "dim",
+           "text": "${$opn.view.wan_ip}",
+           "size": 14,
+           "color": "$opn.view.wan_ip_color",
+           "bold": true,
            "align": "right"
           }
          },
          {
-          "id": "fw5",
+          "id": "fw65",
           "type": "label",
           "props": {
            "x": 14,
@@ -1648,7 +1650,7 @@
           }
          },
          {
-          "id": "fw6",
+          "id": "fw66",
           "type": "label",
           "props": {
            "x": 34,
@@ -1660,7 +1662,7 @@
           }
          },
          {
-          "id": "fw7",
+          "id": "fw67",
           "type": "bar",
           "props": {
            "x": 14,
@@ -1673,7 +1675,7 @@
           }
          },
          {
-          "id": "fw8",
+          "id": "fw68",
           "type": "label",
           "props": {
            "x": 14,
@@ -1685,7 +1687,7 @@
           }
          },
          {
-          "id": "fw9",
+          "id": "fw69",
           "type": "label",
           "props": {
            "x": 34,
@@ -1697,7 +1699,7 @@
           }
          },
          {
-          "id": "fw10",
+          "id": "fw70",
           "type": "bar",
           "props": {
            "x": 14,
@@ -1710,7 +1712,7 @@
           }
          },
          {
-          "id": "fw11",
+          "id": "fw71",
           "type": "label",
           "props": {
            "x": 14,
@@ -1722,7 +1724,7 @@
           }
          },
          {
-          "id": "fw12",
+          "id": "fw72",
           "type": "label",
           "props": {
            "x": 0,
@@ -1734,33 +1736,59 @@
            "color": "$opn.view.loss_color",
            "align": "right"
           }
+         },
+         {
+          "id": "fw73",
+          "type": "label",
+          "props": {
+           "x": 14,
+           "y": 134,
+           "text": "LTE",
+           "size": 13,
+           "color": "muted"
+          }
+         },
+         {
+          "id": "fw74",
+          "type": "label",
+          "props": {
+           "x": 0,
+           "y": 134,
+           "w": 160,
+           "r": 14,
+           "text": "${$opn.view.lte_ip} · ${$opn.view.lte_gw}",
+           "size": 13,
+           "color": "$opn.view.lte_color",
+           "align": "right"
+          }
          }
         ]
        },
        {
-        "id": "fw19",
+        "id": "fw82",
         "type": "free",
         "props": {
          "x": 222,
          "y": 0,
          "w": 214,
-         "h": 136,
-         "bg": "card"
+         "h": 160,
+         "bg": "card",
+         "link": "fw-dns"
         },
         "children": [
          {
-          "id": "fw14",
+          "id": "fw76",
           "type": "label",
           "props": {
            "x": 14,
            "y": 10,
-           "text": "DNS · Unbound",
+           "text": "DNS · Unbound ›",
            "size": 15,
            "color": "muted"
           }
          },
          {
-          "id": "fw15",
+          "id": "fw77",
           "type": "label",
           "props": {
            "x": 14,
@@ -1772,7 +1800,7 @@
           }
          },
          {
-          "id": "fw16",
+          "id": "fw78",
           "type": "kv",
           "props": {
            "x": 14,
@@ -1784,7 +1812,7 @@
           }
          },
          {
-          "id": "fw17",
+          "id": "fw79",
           "type": "kv",
           "props": {
            "x": 14,
@@ -1796,7 +1824,7 @@
           }
          },
          {
-          "id": "fw18",
+          "id": "fw80",
           "type": "kv",
           "props": {
            "x": 14,
@@ -1806,22 +1834,34 @@
            "text": "${$opn.view.q24}",
            "size": 14
           }
+         },
+         {
+          "id": "fw81",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 132,
+           "r": 14,
+           "label": "Blocklist",
+           "text": "${$opn.view.blocked}",
+           "size": 14
+          }
          }
         ]
        },
        {
-        "id": "fw27",
+        "id": "fw91",
         "type": "free",
         "props": {
          "x": 444,
          "y": 0,
          "w": 214,
-         "h": 136,
+         "h": 160,
          "bg": "card"
         },
         "children": [
          {
-          "id": "fw20",
+          "id": "fw83",
           "type": "label",
           "props": {
            "x": 14,
@@ -1832,7 +1872,7 @@
           }
          },
          {
-          "id": "fw21",
+          "id": "fw84",
           "type": "label",
           "props": {
            "x": 0,
@@ -1846,7 +1886,7 @@
           }
          },
          {
-          "id": "fw22",
+          "id": "fw85",
           "type": "label",
           "props": {
            "x": 14,
@@ -1858,7 +1898,7 @@
           }
          },
          {
-          "id": "fw23",
+          "id": "fw86",
           "type": "bar",
           "props": {
            "x": 14,
@@ -1871,7 +1911,7 @@
           }
          },
          {
-          "id": "fw24",
+          "id": "fw87",
           "type": "kv",
           "props": {
            "x": 14,
@@ -1883,7 +1923,7 @@
           }
          },
          {
-          "id": "fw25",
+          "id": "fw88",
           "type": "kv",
           "props": {
            "x": 14,
@@ -1895,11 +1935,23 @@
           }
          },
          {
-          "id": "fw26",
+          "id": "fw89",
           "type": "kv",
           "props": {
            "x": 14,
            "y": 114,
+           "r": 14,
+           "label": "DHCP leases",
+           "text": "${$opn.view.leases}",
+           "size": 14
+          }
+         },
+         {
+          "id": "fw90",
+          "type": "kv",
+          "props": {
+           "x": 14,
+           "y": 136,
            "r": 14,
            "label": "Up",
            "text": "${$opn.view.uptime}",
@@ -1909,29 +1961,30 @@
         ]
        },
        {
-        "id": "fw36",
+        "id": "fw100",
         "type": "free",
         "props": {
          "x": 0,
-         "y": 144,
+         "y": 168,
          "w": 330,
-         "h": 276,
-         "bg": "card"
+         "h": 252,
+         "bg": "card",
+         "link": "fw-talkers"
         },
         "children": [
          {
-          "id": "fw28",
+          "id": "fw92",
           "type": "label",
           "props": {
            "x": 14,
            "y": 10,
-           "text": "Top talkers · LAN",
+           "text": "Top talkers · LAN ›",
            "size": 15,
            "color": "muted"
           }
          },
          {
-          "id": "fw29",
+          "id": "fw93",
           "type": "label",
           "props": {
            "x": 0,
@@ -1945,7 +1998,7 @@
           }
          },
          {
-          "id": "fw30",
+          "id": "fw94",
           "type": "label",
           "props": {
            "x": 14,
@@ -1961,17 +2014,17 @@
           }
          },
          {
-          "id": "fw35",
+          "id": "fw99",
           "type": "repeater",
           "props": {
            "x": 0,
            "y": 34,
            "w": 330,
-           "h": 238,
+           "h": 204,
            "source": "model",
            "path": "$opn.view.talkers",
            "empty": "",
-           "max": 7,
+           "max": 6,
            "mode": "all",
            "columns": 1,
            "row_h": 34,
@@ -1979,7 +2032,7 @@
           },
           "children": [
            {
-            "id": "fw34",
+            "id": "fw98",
             "type": "free",
             "props": {
              "x": 0,
@@ -1988,7 +2041,7 @@
             },
             "children": [
              {
-              "id": "fw31",
+              "id": "fw95",
               "type": "label",
               "props": {
                "x": 14,
@@ -1999,7 +2052,7 @@
               }
              },
              {
-              "id": "fw32",
+              "id": "fw96",
               "type": "label",
               "props": {
                "x": 0,
@@ -2013,7 +2066,7 @@
               }
              },
              {
-              "id": "fw33",
+              "id": "fw97",
               "type": "bar",
               "props": {
                "x": 14,
@@ -2032,49 +2085,50 @@
         ]
        },
        {
-        "id": "fw51",
+        "id": "fw115",
         "type": "free",
         "props": {
          "x": 338,
-         "y": 144,
+         "y": 168,
          "w": 320,
-         "h": 276
+         "h": 252
         },
         "children": [
          {
-          "id": "fw43",
+          "id": "fw107",
           "type": "free",
           "props": {
            "x": 0,
            "y": 0,
            "w": 320,
-           "h": 134,
-           "bg": "card"
+           "h": 122,
+           "bg": "card",
+           "link": "fw-dns"
           },
           "children": [
            {
-            "id": "fw37",
+            "id": "fw101",
             "type": "label",
             "props": {
              "x": 14,
              "y": 8,
-             "text": "Top DNS domains",
+             "text": "Top DNS domains ›",
              "size": 14,
              "color": "muted"
             }
            },
            {
-            "id": "fw42",
+            "id": "fw106",
             "type": "repeater",
             "props": {
-             "x": 0,
+             "x": 14,
              "y": 30,
-             "w": 320,
-             "h": 100,
+             "w": 306,
+             "h": 80,
              "source": "model",
              "path": "$opn.view.domains",
              "empty": "",
-             "max": 5,
+             "max": 4,
              "mode": "all",
              "columns": 1,
              "row_h": 20,
@@ -2082,7 +2136,7 @@
             },
             "children": [
              {
-              "id": "fw41",
+              "id": "fw105",
               "type": "free",
               "props": {
                "x": 0,
@@ -2091,10 +2145,10 @@
               },
               "children": [
                {
-                "id": "fw38",
+                "id": "fw102",
                 "type": "bar",
                 "props": {
-                 "x": 14,
+                 "x": 0,
                  "y": 17,
                  "w": 292,
                  "h": 2,
@@ -2104,10 +2158,10 @@
                 }
                },
                {
-                "id": "fw39",
+                "id": "fw103",
                 "type": "label",
                 "props": {
-                 "x": 14,
+                 "x": 0,
                  "y": 0,
                  "r": 78,
                  "text": "${@name}",
@@ -2115,7 +2169,7 @@
                 }
                },
                {
-                "id": "fw40",
+                "id": "fw104",
                 "type": "label",
                 "props": {
                  "x": 0,
@@ -2135,39 +2189,40 @@
           ]
          },
          {
-          "id": "fw50",
+          "id": "fw114",
           "type": "free",
           "props": {
            "x": 0,
-           "y": 142,
+           "y": 130,
            "w": 320,
-           "h": 134,
-           "bg": "card"
+           "h": 122,
+           "bg": "card",
+           "link": "fw-dns"
           },
           "children": [
            {
-            "id": "fw44",
+            "id": "fw108",
             "type": "label",
             "props": {
              "x": 14,
              "y": 8,
-             "text": "Top DNS clients · 24 h",
+             "text": "Top DNS clients · 24 h ›",
              "size": 14,
              "color": "muted"
             }
            },
            {
-            "id": "fw49",
+            "id": "fw113",
             "type": "repeater",
             "props": {
-             "x": 0,
+             "x": 14,
              "y": 30,
-             "w": 320,
-             "h": 100,
+             "w": 306,
+             "h": 80,
              "source": "model",
              "path": "$opn.view.clients",
              "empty": "",
-             "max": 5,
+             "max": 4,
              "mode": "all",
              "columns": 1,
              "row_h": 20,
@@ -2175,7 +2230,7 @@
             },
             "children": [
              {
-              "id": "fw48",
+              "id": "fw112",
               "type": "free",
               "props": {
                "x": 0,
@@ -2184,10 +2239,10 @@
               },
               "children": [
                {
-                "id": "fw45",
+                "id": "fw109",
                 "type": "bar",
                 "props": {
-                 "x": 14,
+                 "x": 0,
                  "y": 17,
                  "w": 292,
                  "h": 2,
@@ -2197,10 +2252,10 @@
                 }
                },
                {
-                "id": "fw46",
+                "id": "fw110",
                 "type": "label",
                 "props": {
-                 "x": 14,
+                 "x": 0,
                  "y": 0,
                  "r": 78,
                  "text": "${@name}",
@@ -2208,7 +2263,7 @@
                 }
                },
                {
-                "id": "fw47",
+                "id": "fw111",
                 "type": "label",
                 "props": {
                  "x": 0,
@@ -2233,7 +2288,815 @@
      }
     ]
    },
-   "details": []
+   "details": [
+    {
+     "id": "fw-wan",
+     "title": "Interfaces",
+     "root": {
+      "id": "fw22",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 658,
+       "h": 420,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "fw1",
+        "type": "button",
+        "props": {
+         "x": 12,
+         "y": 10,
+         "w": 90,
+         "h": 32,
+         "label": "‹ Back",
+         "action": "back",
+         "color": "muted",
+         "size": 14,
+         "exact": true
+        }
+       },
+       {
+        "id": "fw2",
+        "type": "label",
+        "props": {
+         "x": 116,
+         "y": 14,
+         "w": 400,
+         "text": "Interfaces & gateways",
+         "size": 18,
+         "bold": true
+        }
+       },
+       {
+        "id": "fw12",
+        "type": "repeater",
+        "props": {
+         "x": 10,
+         "y": 52,
+         "w": 638,
+         "h": 222,
+         "source": "model",
+         "path": "$opn.view.ifaces",
+         "empty": "",
+         "mode": "all",
+         "columns": 1,
+         "row_h": 74,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "fw11",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 74
+          },
+          "children": [
+           {
+            "id": "fw3",
+            "type": "box",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "w": 638,
+             "h": 68,
+             "color": "card2",
+             "radius": 10
+            }
+           },
+           {
+            "id": "fw4",
+            "type": "dot",
+            "props": {
+             "x": 12,
+             "y": 12,
+             "w": 12,
+             "h": 12,
+             "color": "@color",
+             "radius": 6
+            }
+           },
+           {
+            "id": "fw5",
+            "type": "label",
+            "props": {
+             "x": 32,
+             "y": 8,
+             "w": 140,
+             "text": "${@name}",
+             "size": 17,
+             "bold": true
+            }
+           },
+           {
+            "id": "fw6",
+            "type": "label",
+            "props": {
+             "x": 180,
+             "y": 8,
+             "w": 230,
+             "text": "${@ip}",
+             "size": 17,
+             "color": "@ip_color",
+             "bold": true
+            }
+           },
+           {
+            "id": "fw7",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 10,
+             "w": 200,
+             "r": 14,
+             "text": "${@gw}",
+             "size": 14,
+             "color": "muted",
+             "align": "right"
+            }
+           },
+           {
+            "id": "fw8",
+            "type": "label",
+            "props": {
+             "x": 32,
+             "y": 38,
+             "w": 390,
+             "text": "${@dev} · ${@media} · ${@mac}",
+             "size": 13,
+             "color": "dim"
+            }
+           },
+           {
+            "id": "fw9",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 30,
+             "w": 200,
+             "r": 14,
+             "text": "${@rates}",
+             "size": 14,
+             "align": "right"
+            }
+           },
+           {
+            "id": "fw10",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 48,
+             "w": 200,
+             "r": 14,
+             "text": "${@errors}",
+             "size": 12,
+             "color": "@err_color",
+             "align": "right"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "fw13",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 282,
+         "text": "Gateways",
+         "size": 15,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "fw21",
+        "type": "repeater",
+        "props": {
+         "x": 10,
+         "y": 306,
+         "w": 638,
+         "h": 110,
+         "source": "model",
+         "path": "$opn.view.gws",
+         "empty": "",
+         "mode": "all",
+         "columns": 1,
+         "row_h": 52,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "fw20",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 52
+          },
+          "children": [
+           {
+            "id": "fw14",
+            "type": "box",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "w": 638,
+             "h": 48,
+             "color": "card2",
+             "radius": 10
+            }
+           },
+           {
+            "id": "fw15",
+            "type": "dot",
+            "props": {
+             "x": 12,
+             "y": 10,
+             "w": 12,
+             "h": 12,
+             "color": "@color",
+             "radius": 6
+            }
+           },
+           {
+            "id": "fw16",
+            "type": "label",
+            "props": {
+             "x": 32,
+             "y": 6,
+             "w": 150,
+             "text": "${@name}",
+             "size": 16,
+             "bold": true
+            }
+           },
+           {
+            "id": "fw17",
+            "type": "label",
+            "props": {
+             "x": 32,
+             "y": 26,
+             "w": 150,
+             "text": "${@status}",
+             "size": 12,
+             "color": "@color"
+            }
+           },
+           {
+            "id": "fw18",
+            "type": "label",
+            "props": {
+             "x": 180,
+             "y": 6,
+             "w": 260,
+             "text": "${@addr} · ${@monitor}",
+             "size": 13,
+             "color": "muted"
+            }
+           },
+           {
+            "id": "fw19",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 16,
+             "w": 230,
+             "r": 14,
+             "text": "${@latency} ±${@jitter} · loss ${@loss}",
+             "size": 15,
+             "align": "right"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "fw-talkers",
+     "title": "Talkers",
+     "root": {
+      "id": "fw41",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 658,
+       "h": 420,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "fw23",
+        "type": "button",
+        "props": {
+         "x": 12,
+         "y": 10,
+         "w": 90,
+         "h": 32,
+         "label": "‹ Back",
+         "action": "back",
+         "color": "muted",
+         "size": 14,
+         "exact": true
+        }
+       },
+       {
+        "id": "fw24",
+        "type": "label",
+        "props": {
+         "x": 116,
+         "y": 14,
+         "w": 400,
+         "text": "Top talkers",
+         "size": 18,
+         "bold": true
+        }
+       },
+       {
+        "id": "fw25",
+        "type": "label",
+        "props": {
+         "x": 0,
+         "y": 18,
+         "w": 100,
+         "r": 14,
+         "text": "${$opn.view.updated}",
+         "size": 12,
+         "color": "dim",
+         "align": "right"
+        }
+       },
+       {
+        "id": "fw26",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 52,
+         "text": "LAN devices",
+         "size": 14,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "fw27",
+        "type": "label",
+        "props": {
+         "x": 14,
+         "y": 80,
+         "w": 380,
+         "text": "${$opn.view.top_empty}",
+         "size": 14,
+         "color": "dim",
+         "show_if": {
+          "ref": "$opn.view.talkers",
+          "op": "is_empty"
+         }
+        }
+       },
+       {
+        "id": "fw34",
+        "type": "repeater",
+        "props": {
+         "x": 10,
+         "y": 74,
+         "w": 400,
+         "h": 340,
+         "source": "model",
+         "path": "$opn.view.talkers",
+         "empty": "",
+         "max": 8,
+         "mode": "all",
+         "columns": 1,
+         "row_h": 42,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "fw33",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 42
+          },
+          "children": [
+           {
+            "id": "fw28",
+            "type": "label",
+            "props": {
+             "x": 4,
+             "y": 0,
+             "r": 150,
+             "text": "${@name}",
+             "size": 15
+            }
+           },
+           {
+            "id": "fw29",
+            "type": "label",
+            "props": {
+             "x": 4,
+             "y": 20,
+             "r": 150,
+             "text": "${@ip_full|or:} ${@vendor|or:}",
+             "size": 11,
+             "color": "dim"
+            }
+           },
+           {
+            "id": "fw30",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "w": 140,
+             "r": 4,
+             "text": "↓${@down}",
+             "size": 14,
+             "align": "right"
+            }
+           },
+           {
+            "id": "fw31",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 19,
+             "w": 140,
+             "r": 4,
+             "text": "↑${@up}",
+             "size": 13,
+             "color": "muted",
+             "align": "right"
+            }
+           },
+           {
+            "id": "fw32",
+            "type": "bar",
+            "props": {
+             "x": 4,
+             "y": 37,
+             "w": 386,
+             "h": 2,
+             "value": "@share",
+             "max": 1,
+             "color": "@color"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "fw35",
+        "type": "label",
+        "props": {
+         "x": 426,
+         "y": 52,
+         "text": "Remote hosts",
+         "size": 14,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "fw40",
+        "type": "repeater",
+        "props": {
+         "x": 420,
+         "y": 74,
+         "w": 230,
+         "h": 340,
+         "source": "model",
+         "path": "$opn.view.remote_all",
+         "empty": "",
+         "max": 8,
+         "mode": "all",
+         "columns": 1,
+         "row_h": 42,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "fw39",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 42
+          },
+          "children": [
+           {
+            "id": "fw36",
+            "type": "label",
+            "props": {
+             "x": 4,
+             "y": 0,
+             "r": 4,
+             "text": "${@name}",
+             "size": 13
+            }
+           },
+           {
+            "id": "fw37",
+            "type": "label",
+            "props": {
+             "x": 4,
+             "y": 18,
+             "w": 110,
+             "text": "${@ip|or:}",
+             "size": 11,
+             "color": "dim"
+            }
+           },
+           {
+            "id": "fw38",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 18,
+             "w": 130,
+             "r": 8,
+             "text": "↓${@down} ↑${@up}",
+             "size": 11,
+             "color": "muted",
+             "align": "right"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "id": "fw-dns",
+     "title": "DNS",
+     "root": {
+      "id": "fw60",
+      "type": "free",
+      "props": {
+       "x": 0,
+       "y": 0,
+       "w": 658,
+       "h": 420,
+       "bg": "card"
+      },
+      "children": [
+       {
+        "id": "fw42",
+        "type": "button",
+        "props": {
+         "x": 12,
+         "y": 10,
+         "w": 90,
+         "h": 32,
+         "label": "‹ Back",
+         "action": "back",
+         "color": "muted",
+         "size": 14,
+         "exact": true
+        }
+       },
+       {
+        "id": "fw43",
+        "type": "label",
+        "props": {
+         "x": 116,
+         "y": 14,
+         "w": 400,
+         "text": "DNS · Unbound",
+         "size": 18,
+         "bold": true
+        }
+       },
+       {
+        "id": "fw47",
+        "type": "repeater",
+        "props": {
+         "x": 14,
+         "y": 56,
+         "w": 200,
+         "h": 240,
+         "source": "model",
+         "path": "$opn.view.dns_rows",
+         "empty": "",
+         "mode": "all",
+         "columns": 1,
+         "row_h": 24,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "fw46",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 24
+          },
+          "children": [
+           {
+            "id": "fw44",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "w": 120,
+             "text": "${@k}",
+             "size": 13,
+             "color": "muted"
+            }
+           },
+           {
+            "id": "fw45",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "w": 80,
+             "r": 0,
+             "text": "${@v}",
+             "size": 14,
+             "align": "right"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "fw48",
+        "type": "label",
+        "props": {
+         "x": 232,
+         "y": 56,
+         "text": "Top domains",
+         "size": 14,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "fw53",
+        "type": "repeater",
+        "props": {
+         "x": 232,
+         "y": 80,
+         "w": 200,
+         "h": 176,
+         "source": "model",
+         "path": "$opn.view.domains_all",
+         "empty": "",
+         "max": 8,
+         "mode": "all",
+         "columns": 1,
+         "row_h": 22,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "fw52",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 22
+          },
+          "children": [
+           {
+            "id": "fw49",
+            "type": "bar",
+            "props": {
+             "x": 0,
+             "y": 19,
+             "w": 186,
+             "h": 2,
+             "value": "@share",
+             "max": 1,
+             "color": "line"
+            }
+           },
+           {
+            "id": "fw50",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "r": 78,
+             "text": "${@name}",
+             "size": 12
+            }
+           },
+           {
+            "id": "fw51",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "w": 64,
+             "r": 14,
+             "text": "${@count}",
+             "size": 12,
+             "color": "muted",
+             "align": "right"
+            }
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "id": "fw54",
+        "type": "label",
+        "props": {
+         "x": 450,
+         "y": 56,
+         "text": "Top clients · 24 h",
+         "size": 14,
+         "color": "muted"
+        }
+       },
+       {
+        "id": "fw59",
+        "type": "repeater",
+        "props": {
+         "x": 450,
+         "y": 80,
+         "w": 200,
+         "h": 176,
+         "source": "model",
+         "path": "$opn.view.clients_all",
+         "empty": "",
+         "max": 8,
+         "mode": "all",
+         "columns": 1,
+         "row_h": 22,
+         "gap_y": 0
+        },
+        "children": [
+         {
+          "id": "fw58",
+          "type": "free",
+          "props": {
+           "x": 0,
+           "y": 0,
+           "h": 22
+          },
+          "children": [
+           {
+            "id": "fw55",
+            "type": "bar",
+            "props": {
+             "x": 0,
+             "y": 19,
+             "w": 186,
+             "h": 2,
+             "value": "@share",
+             "max": 1,
+             "color": "line"
+            }
+           },
+           {
+            "id": "fw56",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "r": 78,
+             "text": "${@name}",
+             "size": 12
+            }
+           },
+           {
+            "id": "fw57",
+            "type": "label",
+            "props": {
+             "x": 0,
+             "y": 0,
+             "w": 64,
+             "r": 14,
+             "text": "${@count}",
+             "size": 12,
+             "color": "muted",
+             "align": "right"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      ]
+     }
+    }
+   ]
   },
   {
    "id": "ports",

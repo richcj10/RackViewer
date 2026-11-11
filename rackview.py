@@ -685,6 +685,8 @@ def build_model(data):
     fw.update(wan_cidr=ifattr("wan", "ipv4"), wan_ip=ip_only(ifattr("wan", "ipv4")),
               wan_gw_ip=gws[0] if gws else None, wan_ip6=ip_only(ifattr("wan", "ipv6")),
               wwan_ip=ip_only(ifattr("wwan", "ipv4")), lan_ip=ip_only(ifattr("lan", "ipv4")))
+    fw["if_attrs"] = {n: dict((ents.get(f"{fp}interface_{n}_status") or {}).get("a") or {},
+                              state=st(f"{fp}interface_{n}_status")) for n in FIREWALL_IFACES}
     fw["sev"] = 0
     if fw["present"]:
         if fw["wan"] != "up" or fw["wan_gw"] != "online":
@@ -1267,6 +1269,53 @@ def view_fields(m, data):
         top_empty="Quiet: nobody is moving traffic right now" if opn["live"] else "Waiting for data…",
         updated=time.strftime("%H:%M:%S", time.localtime(oa["updated"])) if oa.get("updated") else "",
     )
+    v = opn["view"]
+    fwm = m["fw"]
+    v["wan_ip"] = fwm.get("wan_ip") or "no IP"
+    v["wan_ip_color"] = "text" if fwm.get("wan_ip") else "crit"
+    v["lte_ip"] = fwm.get("wwan_ip") or "no IP"
+    v["lte_color"] = "text" if fwm.get("wwan_ip") else "warn"
+    v["lte_gw"] = (fwm.get("bwan_gw") or "—")
+    v["lte_gw_color"] = "ok" if fwm.get("bwan_gw") == "online" else "warn"
+    # interface detail: addresses from the HA OPNsense integration, live rates from the add-on
+    ifs = oa.get("interfaces") or {}
+    v["ifaces"] = []
+    for label, ha_key, addon_key in (("WAN", "wan", "wan"), ("LTE / WWAN", "wwan", "opt1"), ("LAN", "lan", "lan")):
+        ia = (fwm.get("if_attrs") or {}).get(ha_key) or {}
+        ad = ifs.get(addon_key) or {}
+        up = ia.get("state") == "up"
+        gws = ia.get("gateways") or []
+        v["ifaces"].append(dict(
+            name=label, ip=ia.get("ipv4") or "no IP", ip_color="text" if ia.get("ipv4") else "warn",
+            state=ia.get("state") or "—", color="ok" if up else "crit" if ia.get("state") else "dim",
+            gw=f"gw {gws[0]}" if gws else "", media=(ia.get("media") or "").replace(" <full-duplex>", " FD"),
+            dev=ia.get("device") or ad.get("device") or "", mac=ia.get("mac") or "",
+            rates=f"↓{rate(ad.get('rx_mbps'))}  ↑{rate(ad.get('tx_mbps'))}" if ad else "",
+            errors=f"{ad.get('errors', 0):,} err · {ad.get('drops', 0):,} drop" if ad else "",
+            err_color="warn" if (ad.get("errors") or 0) or (ad.get("drops") or 0) else "dim"))
+    v["gws"] = [dict(name=g.get("name", "").replace("_DHCP", ""), status=g.get("status") or "—",
+                     color="ok" if g.get("status") == "Online" else "crit",
+                     addr=g.get("address") if g.get("address") not in (None, "~") else "no address",
+                     monitor=f"pings {g['monitor']}" if g.get("monitor") else "",
+                     latency=fmt(g.get("delay_ms"), " ms", 1), jitter=fmt(g.get("stddev_ms"), " ms", 1),
+                     loss=fmt(g.get("loss_pct"), "%", 1))
+                for g in oa.get("gateways") or []]
+    v["remote_all"] = [dict(name=t.get("name") or t.get("ip"), ip=t.get("ip") if t.get("name") else "",
+                            down=rate(t.get("down_mbps")), up=rate(t.get("up_mbps")))
+                       for t in ((oa.get("top") or {}).get("wan") or [])]
+    for t, raw in zip(v["talkers"], tops):
+        t["vendor"] = raw.get("vendor") or ""
+        t["ip_full"] = raw.get("ip") or ""
+    v["dns_rows"] = [dict(k=k, v=x) for k, x in (
+        ("Queries / s", v["qps"]), ("Cache hits", v["cache"]), ("Recursion avg", v["recursion"]),
+        ("Recursion median", fmt(dns.get("recursion_median_ms"), " ms", 0)),
+        ("Queries 24 h", v["q24"]), ("Since restart", big(dns.get("queries"))),
+        ("Answered locally", fmt(dns.get("local_pct"), "%", 1)), ("Timed out", str(dns.get("timed_out", "—"))),
+        ("Blocklist", v["blocked"]), ("DHCP leases", v["leases"]))]
+    v["domains_all"] = [dict(name=d.get("domain"), count=big(d.get("count")), share=(d.get("count") or 0) / dpeak)
+                        for d in dns.get("top_domains") or []]
+    v["clients_all"] = [dict(name=c.get("name") or names.get(c.get("ip")) or c.get("ip"), count=big(c.get("count")),
+                             share=(c.get("count") or 0) / cpeak) for c in dns.get("top_clients") or []]
 
     # --- hotspot
     hs = m["hotspot"]
