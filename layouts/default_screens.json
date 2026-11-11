@@ -1162,7 +1162,7 @@
    "enabled": true,
    "middle": "reping",
    "root": {
-    "id": "nw28",
+    "id": "nw29",
     "type": "free",
     "props": {
      "x": 0,
@@ -1172,7 +1172,7 @@
     },
     "children": [
      {
-      "id": "nw10",
+      "id": "nw11",
       "type": "free",
       "props": {
        "x": 0,
@@ -1293,11 +1293,23 @@
          "text": "${$fw.cpu|d:0|u:%} · ${$fw.mem|d:0|u:%} · ${$fw.temp|d:0|u:$fw.temp_u}",
          "size": 15
         }
+       },
+       {
+        "id": "nw10",
+        "type": "kv",
+        "props": {
+         "x": 14,
+         "y": 210,
+         "r": 14,
+         "label": "WAN IP",
+         "text": "${$fw.wan_ip|or:—} · gw ${$fw.wan_gw_ip|or:—}",
+         "size": 15
+        }
        }
       ]
      },
      {
-      "id": "nw18",
+      "id": "nw19",
       "type": "free",
       "props": {
        "x": 338,
@@ -1308,7 +1320,7 @@
       },
       "children": [
        {
-        "id": "nw11",
+        "id": "nw12",
         "type": "label",
         "props": {
          "x": 14,
@@ -1319,7 +1331,7 @@
         }
        },
        {
-        "id": "nw17",
+        "id": "nw18",
         "type": "repeater",
         "props": {
          "x": 0,
@@ -1336,7 +1348,7 @@
         },
         "children": [
          {
-          "id": "nw16",
+          "id": "nw17",
           "type": "free",
           "props": {
            "x": 0,
@@ -1345,7 +1357,7 @@
           },
           "children": [
            {
-            "id": "nw12",
+            "id": "nw13",
             "type": "dot",
             "props": {
              "x": 15,
@@ -1357,7 +1369,7 @@
             }
            },
            {
-            "id": "nw13",
+            "id": "nw14",
             "type": "label",
             "props": {
              "x": 32,
@@ -1367,7 +1379,7 @@
             }
            },
            {
-            "id": "nw14",
+            "id": "nw15",
             "type": "label",
             "props": {
              "x": 0,
@@ -1380,7 +1392,7 @@
             }
            },
            {
-            "id": "nw15",
+            "id": "nw16",
             "type": "label",
             "props": {
              "x": 32,
@@ -1397,7 +1409,7 @@
       ]
      },
      {
-      "id": "nw26",
+      "id": "nw27",
       "type": "repeater",
       "props": {
        "x": 0,
@@ -1411,7 +1423,7 @@
       },
       "children": [
        {
-        "id": "nw25",
+        "id": "nw26",
         "type": "free",
         "props": {
          "x": 0,
@@ -1421,7 +1433,7 @@
         },
         "children": [
          {
-          "id": "nw19",
+          "id": "nw20",
           "type": "dot",
           "props": {
            "x": 12,
@@ -1433,7 +1445,7 @@
           }
          },
          {
-          "id": "nw20",
+          "id": "nw21",
           "type": "label",
           "props": {
            "x": 32,
@@ -1445,7 +1457,7 @@
           }
          },
          {
-          "id": "nw21",
+          "id": "nw22",
           "type": "label",
           "props": {
            "x": 0,
@@ -1458,7 +1470,7 @@
           }
          },
          {
-          "id": "nw22",
+          "id": "nw23",
           "type": "kv",
           "props": {
            "x": 14,
@@ -1470,7 +1482,7 @@
           }
          },
          {
-          "id": "nw23",
+          "id": "nw24",
           "type": "kv",
           "props": {
            "x": 14,
@@ -1482,7 +1494,7 @@
           }
          },
          {
-          "id": "nw24",
+          "id": "nw25",
           "type": "kv",
           "props": {
            "x": 14,
@@ -1502,7 +1514,7 @@
       ]
      },
      {
-      "id": "nw27",
+      "id": "nw28",
       "type": "label",
       "props": {
        "x": 14,

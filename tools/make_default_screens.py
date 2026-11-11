@@ -209,6 +209,7 @@ network = screen("network", "Network", "#5a8cff", free(0, 0, 658, 420, [
         KV("WAN ↓ / ↑", "${$fw.wan_in|d:2} / ${$fw.wan_out|d:2} ${$fw.rate_unit}", 14, 138, r=14, size=15),
         KV("LAN ↓ / ↑", "${$fw.lan_in|d:1} / ${$fw.lan_out|d:1} ${$fw.rate_unit}", 14, 162, r=14, size=15),
         KV("CPU · mem · temp", "${$fw.cpu|d:0|u:%} · ${$fw.mem|d:0|u:%} · ${$fw.temp|d:0|u:$fw.temp_u}", 14, 186, r=14, size=15),
+        KV("WAN IP", "${$fw.wan_ip|or:—} · gw ${$fw.wan_gw_ip|or:—}", 14, 210, r=14, size=15),
     ]),
     card(338, 0, 320, 248, [
         L("Ping from rack", 14, 10, 15, "muted"),

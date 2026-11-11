@@ -83,6 +83,7 @@ PING_HOSTS = [tuple(x) for x in cfg("ping_hosts", [   # (label, host or null = d
 UPS_PREFIX = cfg("ups_prefix", "ups")                     # NUT: sensor.<prefix>_status, _battery, ...
 PDU_PREFIX = cfg("pdu_prefix", "usp_pdu_pro")             # UniFi PDU: sensor.<prefix>_outlet_N_outlet_power
 FIREWALL_PREFIX = cfg("firewall_prefix", "opnsense")      # OPNsense: sensor.<prefix>_interface_wan_status, ...
+FIREWALL_IFACES = ("wan", "wwan", "lan")
 INTERNET_ENTITY = cfg("internet_entity", "")              # optional binary_sensor that is on when internet is up
 SCREENS_FILE = os.path.expanduser(cfg("screens_file", "~/.config/rackview/screens.json"))
 FACTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "layouts", "default_screens.json")
@@ -664,6 +665,16 @@ def build_model(data):
               temp=max(fw_temps) if fw_temps else None, temp_u=unit(fp + "temp_cpu_0"),
               leases=nv(fp + "dhcp_leases_all"), boot=st(fp + "system_boottime"),
               notices=st(f"binary_sensor.{FIREWALL_PREFIX}_pending_notices_present"))
+
+    def ifattr(name, key):
+        return ((ents.get(f"{fp}interface_{name}_status") or {}).get("a") or {}).get(key)
+
+    def ip_only(v):
+        return v.split("/")[0] if isinstance(v, str) and v else None
+    gws = ifattr("wan", "gateways") or []
+    fw.update(wan_cidr=ifattr("wan", "ipv4"), wan_ip=ip_only(ifattr("wan", "ipv4")),
+              wan_gw_ip=gws[0] if gws else None, wan_ip6=ip_only(ifattr("wan", "ipv6")),
+              wwan_ip=ip_only(ifattr("wwan", "ipv4")), lan_ip=ip_only(ifattr("lan", "ipv4")))
     fw["sev"] = 0
     if fw["present"]:
         if fw["wan"] != "up" or fw["wan_gw"] != "online":
@@ -997,6 +1008,8 @@ def view_fields(m, data):
         return dict(name=name, value=v or "—", color="ok" if v == good else "crit" if v not in BAD else "muted")
     fw["links"] = [updown("WAN gateway", fw["wan_gw"], "online"), updown("Backup WAN", fw["bwan_gw"], "online"),
                    updown("LTE (WWAN)", fw["wwan"], "up"), updown("OpenVPN", fw["vpn"], "up")]
+    if fw.get("wwan_ip"):
+        fw["links"][2]["value"] += " · " + fw["wwan_ip"]
     m["inet"] = next((p for p in m["pings"] if p["label"] == "Internet"), {})
     for p in m["pings"]:
         p["color"] = sevc(p["sev"], "ok" if p["ms"] is not None else "muted")
@@ -2090,6 +2103,8 @@ class UI:
         if draft and time.time() - draft[1] < 120:          # a screen being edited in the builder
             for _, root in eng.screen_roots({"screens": [draft[0]]}):
                 visit(root, None)
+        for n in FIREWALL_IFACES:                           # interface IPs for the Network page
+            watch.add(f"sensor.{FIREWALL_PREFIX}_interface_{n}_status")
         for rule in self.screens_cfg.get("alerts") or []:
             r_ = rule.get("ref") or rule.get("entity") or ""
             if "{{" in r_:
