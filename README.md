@@ -129,7 +129,7 @@ missing):
 |---|---|
 | Servers | [iDRAC MQTT Poller](https://github.com/richcj10/ha-idrac-plugin) add-on |
 | Time | [SyncServer NTP Monitor](https://github.com/richcj10/ha-syncserver-ntp) add-on |
-| Firewall | OPNsense Stats add-on (local, polls the OPNsense API) |
+| Firewall | [OPNsense Stats](https://github.com/richcj10/ha-opensese_Stats) add-on 
 | Hotspot | [WPSD Hotspot Monitor](https://github.com/richcj10/ha-wpsd-hotspot) add-on |
 | Port Hunt | [UniFi Port Map](https://github.com/richcj10/ha-unifi-portmap) add-on + [UIWLED](https://github.com/richcj10/UIWLED) |
 | Power | NUT (UPS) and UniFi (PDU) integrations; an HA script for the UPS self-test |
