@@ -85,6 +85,12 @@ def form_page(title, text, fields, button, err=""):
     return out
 
 
+def _no_cache(resp):
+    """Pages always come fresh, so a browser never runs an old copy against a newer app."""
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 def create_app(ui):
     import rackview as rv
     import engine as eng
@@ -157,7 +163,7 @@ def create_app(ui):
 
     @app.route("/")
     def index():
-        return send_file(os.path.join(BASE, "builder.html"))
+        return _no_cache(send_file(os.path.join(BASE, "builder.html")))
 
     # ---------------------------------------------------------------- config
     @app.route("/api/config", methods=["GET"])
@@ -520,7 +526,7 @@ def create_app(ui):
     # ---------------------------------------------------------------- live view
     @app.route("/mirror")
     def mirror_page():
-        return send_file(os.path.join(BASE, "mirror.html"))
+        return _no_cache(send_file(os.path.join(BASE, "mirror.html")))
 
     @app.route("/api/mirror/frame")
     def mirror_frame():
