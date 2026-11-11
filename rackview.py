@@ -132,6 +132,7 @@ GPS_HEALTH = {0: "Receiver down", 1: "Unknown mode", 2: "Acquiring signal", 3: "
               4: "Propagate mode", 5: "2D solution", 6: "3D solution", 7: "Position hold", 8: "Time valid"}
 
 W, H = 800, 480
+TOUCH_LOG_FLAG = os.path.expanduser("~/.config/rackview/touch_log")
 RAIL_W = 118
 CW = W - RAIL_W
 
@@ -2900,7 +2901,15 @@ class UI:
         keymap = {pg.K_UP: 0, pg.K_RETURN: 1, pg.K_SPACE: 1, pg.K_DOWN: 2}
         last_model = 0.0
         while True:
-            for ev in pg.event.get():
+            evs = pg.event.get()
+            if evs and os.path.exists(TOUCH_LOG_FLAG):   # touch debugging: touch ~/.config/rackview/touch_log
+                for ev in evs:
+                    if ev.type in (pg.MOUSEBUTTONDOWN, pg.MOUSEBUTTONUP, pg.MOUSEMOTION,
+                                   pg.FINGERDOWN, pg.FINGERUP, pg.FINGERMOTION):
+                        print(f"{time.strftime('%H:%M:%S')} input {pg.event.event_name(ev.type)} "
+                              f"{getattr(ev, 'pos', '')} {getattr(ev, 'x', '')} {getattr(ev, 'y', '')} "
+                              f"touch={getattr(ev, 'touch', '')} mouse={pg.mouse.get_pos()}", flush=True)
+            for ev in evs:
                 if ev.type == pg.QUIT:
                     return
                 if ev.type == pg.KEYDOWN:
