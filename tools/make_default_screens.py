@@ -227,6 +227,72 @@ network = screen("network", "Network", "#5a8cff", free(0, 0, 658, 420, [
     L("No switch data", 14, 266, 15, "muted", show_if=show("$switches", "is_empty")),
 ]), middle="reping")
 
+# ============================================================ Firewall (OPNsense Stats add-on)
+start("fw")
+V = "$opn.view."
+
+
+def top_list(title, path, y, h, rows, row_h=20):
+    return card(0, y, 320, h, [
+        L(title, 14, 8, 14, "muted"),
+        REP(path, 0, 30, 320, rows * row_h, [free(0, 0, None, row_h, [
+            BAR("@share", 14, row_h - 3, 292, 2, max=1, color="line"),
+            L("${@name}", 14, 0, 13, r=78),
+            L("${@count}", 0, 0, 13, "muted", align="right", r=14, w=64),
+        ])], max=rows, mode="all", columns=1, row_h=row_h, gap_y=0),
+    ])
+
+
+firewall = screen("firewall", "Firewall", "#ff6e46", free(0, 0, 658, 420, [
+    L("No firewall stats in HA", 0, 166, 20, "muted", align="center", w=658, show_if=show("$opn.present", "==", False)),
+    L("Install / start the OPNsense Stats add-on", 0, 194, 14, "dim", align="center", w=658,
+      show_if=show("$opn.present", "==", False)),
+    free(0, 0, 658, 420, [
+        card(0, 0, 214, 136, [
+            L("WAN", 14, 10, 15, "muted"),
+            L("${" + V + "line} link", 0, 12, 12, "dim", align="right", r=14, w=110),
+            L("↓", 14, 34, 18, "info", bold=True),
+            L("${" + V + "down}", 34, 30, 24, bold=True, r=14),
+            BAR(V + "down_pct", 14, 62, 186, 4, max=100, color="info"),
+            L("↑", 14, 72, 18, "teal", bold=True),
+            L("${" + V + "up}", 34, 68, 24, bold=True, r=14),
+            BAR(V + "up_pct", 14, 100, 186, 4, max=100, color="teal"),
+            L("${" + V + "latency} ±${" + V + "jitter}", 14, 112, 13, "muted", r=80),
+            L("loss ${" + V + "loss}", 0, 112, 13, V + "loss_color", align="right", r=14, w=80),
+        ]),
+        card(222, 0, 214, 136, [
+            L("DNS · Unbound", 14, 10, 15, "muted"),
+            L("${" + V + "qps} q/s", 14, 30, 24, bold=True, r=14),
+            KV("Cache hits", "${" + V + "cache}", 14, 66, r=14, size=14),
+            KV("Recursion", "${" + V + "recursion}", 14, 88, r=14, size=14),
+            KV("Queries 24 h", "${" + V + "q24}", 14, 110, r=14, size=14),
+        ]),
+        card(444, 0, 214, 136, [
+            L("Packet filter", 14, 10, 15, "muted"),
+            L("${" + V + "version}", 0, 12, 11, "dim", align="right", r=14, w=90),
+            L("${" + V + "states} states", 14, 30, 22, bold=True, r=14),
+            BAR(V + "states_pct", 14, 60, 186, 4, max=100, color="info"),
+            KV("New states", "${" + V + "new_states}", 14, 70, r=14, size=14),
+            KV("Rule matches", "${" + V + "matches}", 14, 92, r=14, size=14),
+            KV("Up", "${" + V + "uptime}", 14, 114, r=14, size=14),
+        ]),
+        card(0, 144, 330, 276, [
+            L("Top talkers · LAN", 14, 10, 15, "muted"),
+            L("${" + V + "updated}", 0, 12, 11, "dim", align="right", r=14, w=90),
+            L("${" + V + "top_empty}", 14, 44, 14, "dim", r=14, show_if=show(V + "talkers", "is_empty")),
+            REP(V + "talkers", 0, 34, 330, 238, [free(0, 0, None, 34, [
+                L("${@name}", 14, 2, 14, r=150),
+                L("↓${@down}  ↑${@up}", 0, 3, 13, "muted", align="right", r=14, w=150),
+                BAR("@share", 14, 24, 302, 3, max=1, color="@color"),
+            ])], max=7, mode="all", columns=1, row_h=34, gap_y=0),
+        ]),
+        free(338, 144, 320, 276, [
+            top_list("Top DNS domains", V + "domains", 0, 134, 5),
+            top_list("Top DNS clients · 24 h", V + "clients", 142, 134, 5),
+        ]),
+    ], show_if=show("$opn.present", "==", True)),
+]))
+
 # ============================================================ Time
 start("tm")
 gps = lambda lab, txt, color=None, cond=None: KV(lab, txt, size=15, color=color, show_if=cond)
@@ -555,7 +621,7 @@ notes = screen("notes", "Scratchbook", "#2ec4b6", card(0, 0, 658, 420, [
 ]))
 
 out = {"version": 2, "alertLabel": "rackview_alert", "alerts": [],
-       "screens": [overview, power, servers, network, ports, time_, hotspot, ha, cooling, lights, timeline, notes, outage]}
+       "screens": [overview, power, servers, network, firewall, ports, time_, hotspot, ha, cooling, lights, timeline, notes, outage]}
 path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "layouts", "default_screens.json")
 os.makedirs(os.path.dirname(path), exist_ok=True)
 with open(path, "w", encoding="utf-8", newline="\n") as f:

@@ -88,6 +88,7 @@ flash Raspberry Pi OS (Bookworm, desktop), `git clone <backup repo> rackview-bac
 | **Network** | Firewall WAN / backup WAN / LTE / VPN, traffic, pings from the rack, switch state and temperatures. |
 | **Port Hunt** | Every wired client on one switch. Tap one: its jack is drawn on a faceplate diagram and **blinks on the real switch** (UniFi Etherlighting via UIWLED). |
 | **Time** | GPS time server: lock, receiver health, holdover, leap second, oscillator; this Pi's offset and jitter; which network devices follow the GPS clock. |
+| **Firewall** | OPNsense detail: WAN down/up rate against the link speed, latency / jitter / loss, DNS (Unbound) queries per second, cache hits, recursion time, top domains and top DNS clients, packet-filter states, and the top LAN talkers with their live rates. |
 | **Hotspot** | WPSD digital-voice hotspot in the style of its *Live Caller* page: current/last caller, talkgroup, BrandMeister static/dynamic talkgroups with expiry countdown, last heard. |
 | **Home Assistant** | Versions, response time, unavailable entities, Zigbee2MQTT, add-ons reporting, host CPU / memory / disk, backups, pending updates. |
 | **Cooling** | Every rack fan's speed and PWM, an **all fans on/off** per controller, per-fan control in a detail view, equipment temperatures. |
@@ -128,6 +129,7 @@ missing):
 |---|---|
 | Servers | [iDRAC MQTT Poller](https://github.com/richcj10/ha-idrac-plugin) add-on |
 | Time | [SyncServer NTP Monitor](https://github.com/richcj10/ha-syncserver-ntp) add-on |
+| Firewall | OPNsense Stats add-on (local, polls the OPNsense API) |
 | Hotspot | [WPSD Hotspot Monitor](https://github.com/richcj10/ha-wpsd-hotspot) add-on |
 | Port Hunt | [UniFi Port Map](https://github.com/richcj10/ha-unifi-portmap) add-on + [UIWLED](https://github.com/richcj10/UIWLED) |
 | Power | NUT (UPS) and UniFi (PDU) integrations; an HA script for the UPS self-test |

@@ -117,6 +117,7 @@ TIME_SERVER = cfg("time_server", "192.168.1.44")
 TIME_POLL = 10                     # the Pi's own offset measurement against the GPS clock
 NTP_EPOCH = 2208988800
 S250_MODEL = "SyncServer S250"     # HA device model published by the SyncServer NTP Monitor add-on
+OPN_MODEL = "OPNsense Stats"       # HA device model published by the OPNsense Stats add-on
 WPSD_MODEL = "WPSD Hotspot"        # HA device model published by the WPSD Hotspot Monitor add-on
 PORTMAP_MODEL = "UniFi Port Map"   # HA device model published by the UniFi Port Map add-on
 PORT_HUNT_SWITCH = cfg("port_hunt_switch", "48_Port")   # UIWLED switch name that gets its jack blinked
@@ -156,6 +157,7 @@ PAGE_COLORS = {
     "power": ((176, 120, 255), (90, 0, 150)),
     "servers": ((60, 210, 230), (0, 110, 130)),
     "network": ((90, 140, 255), (0, 30, 170)),
+    "firewall": ((255, 110, 70), (160, 30, 0)),
     "time": ((255, 110, 190), (150, 0, 70)),
     "cooling": ((150, 200, 255), (50, 90, 160)),
     "lights": ((255, 255, 255), (100, 100, 100)),     # arrows show the live strip instead
@@ -288,6 +290,7 @@ class Data:
         self.rules = []             # alert rules from screens.json
         self.alert_label = ""       # HA label whose binary sensors raise alerts
         self.wpsd = None
+        self.opnstats = None
         self.portmap = None
         self.netclients = None
         self.ha_meta = {}
@@ -323,6 +326,11 @@ class Data:
                "{% if state_attr(e, 'dmr_net') is not none or state_attr(e, 'online') is not none %}"
                "{% set nw.e = e %}{% endif %}{% endfor %}"
                "{% if nw.e %}{{ {'state': states(nw.e), 'attrs': (expand(nw.e) | first).attributes} | tojson }}"
+               "{% else %}null{% endif %}, "
+               "\"opnstats\": {% set nop = namespace(e=none) %}"
+               "{% for e in integration_entities('mqtt') | select('is_device_attr', 'model', '" + OPN_MODEL + "') %}"
+               "{% if state_attr(e, 'top') is not none %}{% set nop.e = e %}{% endif %}{% endfor %}"
+               "{% if nop.e %}{{ {'state': states(nop.e), 'attrs': (expand(nop.e) | first).attributes} | tojson }}"
                "{% else %}null{% endif %}, "
                "\"portmap\": {% set npm = namespace(e=none) %}"
                "{% for e in integration_entities('mqtt') | select('is_device_attr', 'model', '" + PORTMAP_MODEL + "') %}"
@@ -388,6 +396,7 @@ class Data:
                     self.ents, self.s250, self.ha_ok_at, self.ha_err = ents, j.get("s250"), time.time(), ""
                     self.wpsd, self.ha_meta, self.ha_latency = j.get("wpsd"), j.get("ha") or {}, r.elapsed.total_seconds()
                     self.portmap = j.get("portmap")
+                    self.opnstats = j.get("opnstats")
                     self.netclients = j.get("netclients")
                     self.labels = j.get("labels") or []
                 self._render_user_templates()
@@ -509,7 +518,7 @@ class Data:
 
     def snapshot(self):
         with self.lock:
-            t = dict(self.time, history=list(self.time["history"]), s250=self.s250, wpsd=self.wpsd, portmap=self.portmap, netclients=self.netclients,
+            t = dict(self.time, history=list(self.time["history"]), s250=self.s250, wpsd=self.wpsd, opnstats=self.opnstats, portmap=self.portmap, netclients=self.netclients,
                      labels=list(getattr(self, "labels", [])), rules=list(self.rules), tvals=dict(self.tvals),
                      ha_meta=dict(self.ha_meta), ha_latency=self.ha_latency)
             return dict(self.ents), self.ha_ok_at, self.ha_err, list(self.switches), dict(self.pings), t
@@ -843,7 +852,8 @@ def build_model(data):
               addons=[("iDRAC poller", (lambda v: ("on" in v and "off" not in v) if v else None)(
                           [x for x in hm.get("idrac") or [] if x in ("on", "off")])),
                       ("SyncServer NTP", bool(h) and h.get("state") not in BAD),
-                      ("WPSD Hotspot", bool(tdata.get("wpsd")) and tdata["wpsd"].get("state") not in BAD)])
+                      ("WPSD Hotspot", bool(tdata.get("wpsd")) and tdata["wpsd"].get("state") not in BAD),
+                      ("OPNsense Stats", bool(tdata.get("opnstats")) and tdata["opnstats"].get("state") not in BAD)])
     import datetime as _dt
 
     def age_h(iso):
@@ -885,6 +895,28 @@ def build_model(data):
             hs["sev"] = 1
             A.append(Alert(1, "hotspot", "wpsd-dmr", "Hotspot DMR network disconnected", wa.get("dmr_master") or ""))
     m["hotspot"] = hs
+
+    # --- firewall detail (from the OPNsense Stats add-on via HA)
+    o = tdata.get("opnstats")
+    oa = (o or {}).get("attrs") or {}
+    opn = dict(present=bool(o), live=bool(o) and (o or {}).get("state") not in BAD and oa.get("online") == "on",
+               a=oa, state=(o or {}).get("state"), sev=0)
+    if m["ha_age"] is not None and m["ha_age"] < 30:
+        if not o:
+            opn["sev"] = 1
+            A.append(Alert(1, "firewall", "opn-addon", "No firewall stats in HA", "start the OPNsense Stats add-on"))
+        elif not opn["live"]:
+            opn["sev"] = 1
+            A.append(Alert(1, "firewall", "opn-offline", "OPNsense API not answering", oa.get("error") or ""))
+        else:
+            pf = oa.get("pf") or {}
+            if pf.get("states") and pf.get("limit") and pf["states"] > 0.8 * pf["limit"]:
+                opn["sev"] = 1
+                A.append(Alert(1, "firewall", "opn-states", f"Firewall state table {100 * pf['states'] / pf['limit']:.0f}% full"))
+            if ((oa.get("gw_wan") or {}).get("loss_pct") or 0) >= 5:
+                opn["sev"] = 1
+                A.append(Alert(1, "firewall", "opn-loss", f"WAN packet loss {oa['gw_wan']['loss_pct']:.0f}%"))
+    m["opn"] = opn
 
     # --- port map (UniFi Port Map add-on via HA)
     pm = tdata.get("portmap")
@@ -1170,6 +1202,71 @@ def view_fields(m, data):
         all_ok=f"All {hm.get('update_count', '')} components up to date",
         addons=[dict(name=label, color="ok" if ok else "dim" if ok is None else "warn",
                      text="ok" if ok else "—" if ok is None else "no data") for label, ok in ha["addons"]])
+
+    # --- firewall detail (OPNsense Stats add-on)
+    opn = m["opn"]
+    oa = opn["a"]
+
+    def rate(mbps):
+        if mbps is None:
+            return "—"
+        if mbps >= 1000:
+            return f"{mbps / 1000:.2f} Gb/s"
+        if mbps >= 10:
+            return f"{mbps:.0f} Mb/s"
+        if mbps >= 1:
+            return f"{mbps:.1f} Mb/s"
+        return f"{mbps * 1000:.0f} kb/s"
+
+    def big(n):
+        if n is None:
+            return "—"
+        return f"{n / 1e6:.1f} M" if n >= 1e6 else f"{n / 1e3:.1f} k" if n >= 1e3 else f"{n:.0f}"
+
+    names = {c.get("ip"): c.get("name") for c in m.get("netclients") or [] if c.get("ip") and c.get("name")}
+    wan, lan, gw, pf, dns, sy = (oa.get(k) or {} for k in ("wan", "lan", "gw_wan", "pf", "dns", "sys"))
+    line = wan.get("line_mbps") or 1000
+    talk = []
+    tops = (oa.get("top") or {}).get("lan") or []
+    peak = max([t.get("mbps") or 0 for t in tops] + [0.001])
+    for t in tops:
+        nm = t.get("name") or names.get(t.get("ip")) or t.get("vendor") or ""
+        talk.append(dict(name=nm or t.get("ip"), ip=t.get("ip") if nm else "", down=rate(t.get("down_mbps")),
+                         up=rate(t.get("up_mbps")), total=rate(t.get("mbps")), share=(t.get("mbps") or 0) / peak,
+                         color="orange" if (t.get("mbps") or 0) >= 100 else "info"))
+    remote = [dict(name=t.get("name") or t.get("ip"), down=rate(t.get("down_mbps")), up=rate(t.get("up_mbps")))
+              for t in ((oa.get("top") or {}).get("wan") or [])[:4]]
+    dpeak = max([d.get("count") or 0 for d in dns.get("top_domains") or []] + [1])
+    domains = [dict(name=d.get("domain"), count=big(d.get("count")), pct=f"{d.get('pct') or 0:.1f}%",
+                    share=(d.get("count") or 0) / dpeak) for d in (dns.get("top_domains") or [])[:6]]
+    cpeak = max([c.get("count") or 0 for c in dns.get("top_clients") or []] + [1])
+    clients = [dict(name=c.get("name") or names.get(c.get("ip")) or c.get("ip"), count=big(c.get("count")),
+                    share=(c.get("count") or 0) / cpeak) for c in (dns.get("top_clients") or [])[:6]]
+    loss = gw.get("loss_pct")
+    states, limit = pf.get("states"), pf.get("limit")
+    opn["view"] = dict(
+        down=rate(wan.get("rx_mbps")), up=rate(wan.get("tx_mbps")),
+        down_pct=100 * (wan.get("rx_mbps") or 0) / line, up_pct=100 * (wan.get("tx_mbps") or 0) / line,
+        line=rate(line), lan_in=rate((oa.get("lan") or {}).get("rx_mbps")), lan_out=rate(lan.get("tx_mbps")),
+        latency=fmt(gw.get("delay_ms"), " ms", 1), jitter=fmt(gw.get("stddev_ms"), " ms", 1),
+        loss=fmt(loss, "%", 0 if loss is None or loss == int(loss) else 1),
+        loss_color="crit" if (loss or 0) >= 5 else "warn" if (loss or 0) > 0 else "ok",
+        gw_text=" · ".join(f"{g.get('name', '').replace('_DHCP', '')} {g.get('status', '').lower()}"
+                           for g in oa.get("gateways") or []),
+        states=f"{states:,}" if states is not None else "—",
+        states_pct=100 * states / limit if states and limit else 0,
+        limit=f"of {big(limit)}" if limit else "",
+        new_states=fmt(pf.get("inserts_ps"), "/s", 1), matches=fmt(pf.get("matches_ps"), "/s", 0),
+        uptime=(sy.get("uptime") or "—").replace(" days, ", "d ").rsplit(":", 1)[0],
+        version=((sy.get("versions") or [""])[0]).replace("OPNsense ", "").replace("-amd64", ""),
+        leases=str(oa.get("leases") or "—"),
+        qps=fmt(dns.get("qps"), "", 1), cache=fmt(dns.get("cache_hit_pct"), "%", 0),
+        recursion=fmt(dns.get("recursion_ms"), " ms", 0), q24=big(dns.get("queries_24h")),
+        blocked=f"{dns.get('blocked_pct') or 0:.1f}%" if dns.get("blocklist") else "off",
+        talkers=talk, remote=remote, domains=domains, clients=clients,
+        top_empty="Quiet: nobody is moving traffic right now" if opn["live"] else "Waiting for data…",
+        updated=time.strftime("%H:%M:%S", time.localtime(oa["updated"])) if oa.get("updated") else "",
+    )
 
     # --- hotspot
     hs = m["hotspot"]
@@ -1975,13 +2072,18 @@ class UI:
             seen = set(have) | {"overview", "power", "servers", "network", "ports", "time", "hotspot", "ha",
                                 "cooling", "lights"}
             changed = True
+        prev = None
         for x in self.default_screens()["screens"]:
             if x["id"] not in seen:
                 seen.add(x["id"])
                 changed = True
                 if x["id"] not in have:
-                    cfg_.setdefault("screens", []).append(x)
+                    lst = cfg_.setdefault("screens", [])
+                    # place it after the factory screen it follows (e.g. Firewall after Network), else at the end
+                    at = next((i + 1 for i, y in enumerate(lst) if y.get("id") == prev), len(lst))
+                    lst.insert(at, x)
                     print("screens: added new factory screen", x["id"], flush=True)
+            prev = x["id"]
         cfg_["factory_seen"] = sorted(seen)
         return changed
 
@@ -2017,14 +2119,19 @@ class UI:
         except ValueError as e:
             print("screens: invalid JSON, using the factory layouts:", e, flush=True)
             cfg_ = self.default_screens()
-        changed = self.migrate_builtin(cfg_)
-        changed = self.add_new_factory(cfg_) or changed
-        if changed:
+        migrated = self.migrate_builtin(cfg_)
+        added = self.add_new_factory(cfg_)
+        if migrated or added:
+            # a migration keeps the historic .pre-layouts name; adding a new screen keeps a dated copy instead,
+            # so the original pre-migration backup is never overwritten
+            bak = SCREENS_FILE + (".pre-layouts" if migrated else time.strftime(".bak-%Y%m%d-%H%M%S"))
             try:
-                os.replace(SCREENS_FILE, SCREENS_FILE + ".pre-layouts")
+                if os.path.exists(SCREENS_FILE):
+                    os.replace(SCREENS_FILE, bak)
                 with open(SCREENS_FILE, "w", encoding="utf-8") as f:
                     json.dump(cfg_, f, indent=1)
-                print("screens: updated to the current factory layouts (saved the old file as .pre-layouts)", flush=True)
+                print(f"screens: {'migrated to layouts' if migrated else 'added new factory screens'} "
+                      f"(old file kept as {os.path.basename(bak)})", flush=True)
             except OSError as e:
                 print("screens: cannot save converted layouts:", e, flush=True)
         self.apply_screens(cfg_)
