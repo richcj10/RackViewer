@@ -233,7 +233,7 @@ V = "$opn.view."
 
 
 def back(title):
-    return [N("button", dict(pos(12, 10, 90, 32), label="‹ Back", action="back", color="muted", size=14, exact=True)),
+    return [N("button", dict(pos(12, 10, 90, 32), label="‹ Back", action="back", color="info", size=14, exact=True)),
             L(title, 116, 14, 18, bold=True, w=400)]
 
 
@@ -519,7 +519,7 @@ all_btn = lambda on: N("button", dict(
     confirm_text="The fans stop cooling the rack until\nyou turn them back on." if on else None, danger=on or None,
     show_if=show("@ctl_mode", "==", "on" if on else "off")))
 cooling_detail = {"id": "fan-detail", "title": "", "root": card(0, 0, 658, 420, [
-    N("button", dict(pos(12, 10, 90, 32), label="‹ Back", action="back", color="muted", size=14, exact=True)),
+    N("button", dict(pos(12, 10, 90, 32), label="‹ Back", action="back", color="info", size=14, exact=True)),
     DOT("@color", 122, 26, 6),
     L("${@name}", 136, 14, 18, bold=True, w=300),
     L("${@esp_text}", 0, 16, 14, "@esp_color", align="right", r=14, w=150),

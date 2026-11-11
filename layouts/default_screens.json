@@ -2313,7 +2313,7 @@
          "h": 32,
          "label": "‹ Back",
          "action": "back",
-         "color": "muted",
+         "color": "info",
          "size": 14,
          "exact": true
         }
@@ -2603,7 +2603,7 @@
          "h": 32,
          "label": "‹ Back",
          "action": "back",
-         "color": "muted",
+         "color": "info",
          "size": 14,
          "exact": true
         }
@@ -2861,7 +2861,7 @@
          "h": 32,
          "label": "‹ Back",
          "action": "back",
-         "color": "muted",
+         "color": "info",
          "size": 14,
          "exact": true
         }
@@ -5380,7 +5380,7 @@
          "h": 32,
          "label": "‹ Back",
          "action": "back",
-         "color": "muted",
+         "color": "info",
          "size": 14,
          "exact": true
         }
