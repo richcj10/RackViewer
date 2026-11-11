@@ -2925,6 +2925,11 @@ class UI:
                     self.touch_down(*ev.pos)
             while not self.remote_q.empty():
                 kind, x, y = self.remote_q.get()
+                if os.path.exists(TOUCH_LOG_FLAG):
+                    hit = next((getattr(fn, "__name__", "?") for rect, fn in reversed(self.hits)
+                                if rect.collidepoint(x, y)), None) if kind == "down" else ""
+                    print(f"{time.strftime('%H:%M:%S')} remote {kind} {x},{y} page={self.PAGES[self.page]} "
+                          f"screen_on={self.screen_on} dialog={bool(self.dialog)} help={self.help} hit={hit}", flush=True)
                 if kind == "down":
                     self.touch_down(x, y, remote=True)
                 elif kind == "move":
@@ -2933,6 +2938,9 @@ class UI:
                     self.touch_up(x, y)
             while not self.events.empty():
                 kind, btn, *remote = self.events.get()
+                if os.path.exists(TOUCH_LOG_FLAG):
+                    print(f"{time.strftime('%H:%M:%S')} button {kind} {btn} remote={bool(remote)} "
+                          f"page={self.PAGES[self.page]}", flush=True)
                 self.press(kind, btn, bool(remote))
 
             now = time.monotonic()
