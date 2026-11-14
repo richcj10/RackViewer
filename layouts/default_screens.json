@@ -199,7 +199,7 @@
            "x": 14,
            "y": 68,
            "r": 6,
-           "text": "${@watts|d:0|u: W}${@hot_text|or:}",
+           "text": "${@power_short}${@hot_text|or:}",
            "size": 13,
            "color": "muted"
           }
@@ -576,7 +576,7 @@
    "enabled": true,
    "middle": "next",
    "root": {
-    "id": "sv39",
+    "id": "sv46",
     "type": "free",
     "props": {
      "x": 0,
@@ -605,7 +605,7 @@
       }
      },
      {
-      "id": "sv38",
+      "id": "sv45",
       "type": "repeater",
       "props": {
        "x": 0,
@@ -619,7 +619,7 @@
       },
       "children": [
        {
-        "id": "sv37",
+        "id": "sv44",
         "type": "free",
         "props": {
          "x": 0,
@@ -702,7 +702,7 @@
              "y": 109,
              "r": 14,
              "label": "Power",
-             "text": "${@watts|d:0|u: W}",
+             "text": "${@power_text}",
              "size": 16
             }
            },
@@ -713,9 +713,10 @@
              "x": 14,
              "y": 134,
              "r": 14,
-             "label": "PSU in",
-             "text": "${@psu_v|d:0|u: V} ${@psu_a|d:1|u: A}",
-             "size": 16
+             "label": "PSU",
+             "text": "${@psu_in_text}",
+             "size": 16,
+             "color": "@psu_in_color"
             }
            },
            {
@@ -938,7 +939,7 @@
           ]
          },
          {
-          "id": "sv36",
+          "id": "sv43",
           "type": "free",
           "props": {
            "x": 244,
@@ -960,7 +961,7 @@
             }
            },
            {
-            "id": "sv35",
+            "id": "sv42",
             "type": "column",
             "props": {
              "x": 14,
@@ -1135,6 +1136,95 @@
                     },
                     "default": "text"
                    },
+                   "align": "right"
+                  }
+                 }
+                ]
+               }
+              ]
+             },
+             {
+              "id": "sv35",
+              "type": "label",
+              "props": {
+               "x": 0,
+               "y": 0,
+               "h": 34,
+               "text": "Power supplies",
+               "size": 15,
+               "color": "muted",
+               "mt": 8,
+               "show_if": {
+                "ref": "@psus",
+                "op": "not_empty"
+               }
+              }
+             },
+             {
+              "id": "sv41",
+              "type": "repeater",
+              "props": {
+               "source": "model",
+               "path": "@psus",
+               "mode": "all",
+               "columns": 1,
+               "row_h": 23,
+               "gap_y": 0,
+               "empty": ""
+              },
+              "children": [
+               {
+                "id": "sv40",
+                "type": "free",
+                "props": {
+                 "x": 0,
+                 "y": 0,
+                 "h": 23
+                },
+                "children": [
+                 {
+                  "id": "sv36",
+                  "type": "dot",
+                  "props": {
+                   "x": 0,
+                   "y": 6,
+                   "w": 10,
+                   "h": 10,
+                   "color": "@color",
+                   "radius": 5
+                  }
+                 },
+                 {
+                  "id": "sv37",
+                  "type": "label",
+                  "props": {
+                   "x": 18,
+                   "y": 0,
+                   "text": "${@name}",
+                   "size": 14
+                  }
+                 },
+                 {
+                  "id": "sv38",
+                  "type": "label",
+                  "props": {
+                   "x": 100,
+                   "y": 0,
+                   "text": "${@status_text}",
+                   "size": 14,
+                   "color": "@color",
+                   "bold": true
+                  }
+                 },
+                 {
+                  "id": "sv39",
+                  "type": "label",
+                  "props": {
+                   "x": 0,
+                   "y": 0,
+                   "text": "${@detail}",
+                   "size": 14,
+                   "color": "@detail_color",
                    "align": "right"
                   }
                  }

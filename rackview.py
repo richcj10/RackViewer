@@ -572,12 +572,22 @@ def build_model(data):
         power, health = st(eid), st(p + "overall_health")
         if power in BAD and health in BAD:
             continue  # stale/legacy device
-        temps, fans = [], []
+        temps, fans, psus = [], [], {}
         for k in ents:
             if not k.startswith(p):
                 continue
             key = k[len(p):]
             v = nv(k)
+            pm = re.match(r"psu(\d+)_(status|temp|temp_c|fan_rpm)$", key)
+            if pm:   # per-PSU telemetry (Supermicro BMCs): status / temp / fan, shown as its own block
+                d = psus.setdefault(int(pm.group(1)), dict(n=int(pm.group(1)), status=None, temp=None, unit="", rpm=None))
+                if pm.group(2) == "status":
+                    d["status"] = st(k)
+                elif pm.group(2) == "fan_rpm":
+                    d["rpm"] = v
+                else:
+                    d["temp"], d["unit"] = v, unit(k)
+                continue
             if key.endswith("_temp") or key.endswith("_temp_c"):
                 if v is not None:
                     temps.append((pretty_label(key), v, unit(k)))
@@ -591,7 +601,8 @@ def build_model(data):
                    psu_a=nv(p + "psu_input_current"), redund=st(p + "fan_redundancy"),
                    last_error=st(p + "last_error"),
                    reason=(st(p + "health_reason") or "").replace(" | ", " · ") or None,
-                   temps=sorted(temps, key=lambda t: -t[1]), fans=sorted(fans))
+                   temps=sorted(temps, key=lambda t: -t[1]), fans=sorted(fans),
+                   psus=[psus[i] for i in sorted(psus)])
         srv["actions"] = [(key, label, f"button.idrac_{n}_{suffix}") for key, label, suffix, when in SERVER_ACTIONS
                           if f"button.idrac_{n}_{suffix}" in ents and when in ("any", power)]
         srv["sev"] = 0
@@ -1013,7 +1024,29 @@ def view_fields(m, data):
         hot = s["temps"][0] if s["temps"] else None
         s["hot_text"] = f" · {hot['value']:.0f}{hot['unit']} {hot['name']}" if hot and on else ""
         s["fans"] = [dict(n=n, rpm=rpm, name=f"Fan {n}") for n, rpm in s["fans"]]
-        s["temps_max"] = 8 if s["fans"] else 14
+        # power supplies: rows for the Servers screen plus a one-line summary for servers without a power meter
+        for ps in s["psus"]:
+            good = (ps["status"] or "").lower() == "ok"
+            ps["name"] = f"PSU {ps['n']}"
+            ps["color"] = "dim" if ps["status"] in BAD else "ok" if good else "crit"
+            ps["status_text"] = ps["status"] if ps["status"] not in BAD else "—"
+            ps["detail"] = " · ".join(x for x in (
+                fmt(ps["temp"], ps["unit"]) if ps["temp"] is not None else "",
+                fmt(ps["rpm"], " rpm") if ps["rpm"] is not None else "") if x) or "—"
+            ps["detail_color"] = "text" if good else "dim"
+        n_ok = sum(1 for ps in s["psus"] if ps["color"] == "ok")
+        s["psu_summary"] = f"{n_ok} of {len(s['psus'])} OK" if s["psus"] else ""
+        s["psu_summary_color"] = "text" if not s["psus"] or n_ok == len(s["psus"]) else "crit"
+        s["power_text"] = fmt(s["watts"], " W") if s["watts"] is not None else ("no meter" if s["psus"] else "—")
+        has_in = s["psu_v"] is not None or s["psu_a"] is not None
+        s["psu_in_text"] = (f"{fmt(s['psu_v'], ' V')} {fmt(s['psu_a'], ' A', 1)}" if has_in
+                            else s["psu_summary"] or "—")
+        s["psu_in_color"] = "text" if has_in else s["psu_summary_color"]
+        s["power_short"] = (fmt(s["watts"], " W") if s["watts"] is not None
+                            else f"PSU {s['psu_summary']}" if s["psus"] else "—")
+        # fit temps + fans + PSUs into the 374 px column (23 px rows, 42 px per section heading)
+        used = sum(42 + 23 * len(x) for x in (s["fans"], s["psus"]) if x)
+        s["temps_max"] = max(3, min(14, (374 - used) // 23))
         s["no_temps"] = "No readings" + ("" if on else " (server off)")
         s["can"] = {key: True for key, _label, _ent in s["actions"]}
         s["essential"] = s["id"] in ESSENTIAL_SERVERS
